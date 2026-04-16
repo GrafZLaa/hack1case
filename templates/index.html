@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>ПАСПОРТ.ЦИФ</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0A0F1C;--surf:#111827;--surf2:#1A2438;--acc:#F5A623;--acc2:#E8960F;--border:#1E3050;--text:#D9E4F0;--muted:#5A7A9E;--green:#22C55E;--red:#EF4444;--blue:#3B82F6;--yellow:#EAB308}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Onest',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:13px}
+/* HEADER */
+header{background:var(--surf);padding:0 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;height:52px;flex-shrink:0}
+.logo{font-weight:600;color:var(--acc);letter-spacing:1.5px;font-size:14px}
+.header-right{display:flex;align-items:center;gap:10px}
+/* TABS */
+.tabs{display:flex;gap:2px;background:#07090F;padding:4px;border-radius:6px}
+.tab{padding:5px 14px;border-radius:4px;cursor:pointer;font-size:12px;color:var(--muted);border:none;background:transparent;transition:.15s}
+.tab.active{background:var(--surf2);color:var(--text)}
+/* MAIN */
+.main{display:flex;flex:1;overflow:hidden}
+/* SIDEBAR */
+.sidebar{width:280px;background:#07090F;border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-hdr{padding:10px 12px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.list{flex:1;overflow-y:auto;padding:6px}
+.item{padding:9px 10px;border-radius:5px;margin-bottom:4px;cursor:pointer;border:1px solid transparent;transition:.15s}
+.item:hover{background:var(--surf)}
+.item.active{background:var(--surf2);border-color:var(--acc)}
+.item .item-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .item-sub{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'JetBrains Mono'}
+.badge{font-size:9px;padding:1px 6px;border-radius:3px;font-family:'JetBrains Mono';display:inline-block;margin-top:3px}
+.badge-green{background:#0A2A1A;color:var(--green)}
+.badge-blue{background:#0A1A3A;color:var(--blue)}
+.badge-yellow{background:#2A2000;color:var(--yellow)}
+/* WORKSPACE */
+.workspace{flex:1;display:flex;overflow:hidden}
+/* VIEWER */
+.viewer{flex:1;background:#050810;display:flex;align-items:center;justify-content:center;overflow:auto;position:relative;padding:16px}
+#pdf-render{max-width:100%;height:auto;display:none;border-radius:4px}
+.hint{color:var(--muted);text-align:center;cursor:pointer;line-height:1.8}
+.hint .big{font-size:32px;margin-bottom:8px}
+.hint .sub{font-size:11px}
+/* EDITOR */
+.editor{width:380px;background:var(--surf);border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.editor-section{padding:14px 16px;border-bottom:1px solid var(--border)}
+.section-title{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.field{margin-bottom:8px}
+label{font-size:9px;color:var(--muted);font-family:'JetBrains Mono';text-transform:uppercase;display:block;margin-bottom:3px}
+input,textarea,select{background:#080C14;border:1px solid var(--border);border-radius:4px;padding:8px 10px;color:var(--text);font-size:12px;outline:none;width:100%;font-family:'Onest',sans-serif;transition:.15s}
+input:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 2px rgba(245,166,35,.12)}
+/* BARCODE */
+.bc-card{background:#fff;padding:10px 8px;border-radius:5px;text-align:center;margin-top:6px}
+.bc-card img{height:55px;display:block;margin:0 auto}
+.bc-label{font-size:9px;color:#333;font-family:'JetBrains Mono';margin-bottom:3px}
+/* TECH TABLE */
+.tech-table{width:100%;font-size:11px;border-collapse:collapse;margin-top:4px}
+.tech-table td{padding:4px 6px;border:1px solid var(--border);vertical-align:top}
+.tech-table td:first-child{color:var(--muted);width:50%}
+/* SNS */
+.sn-tag{display:inline-flex;align-items:center;gap:4px;background:var(--surf2);border:1px solid var(--border);border-radius:3px;padding:3px 7px;font-size:11px;font-family:'JetBrains Mono';margin:2px}
+.sn-tag .rm{cursor:pointer;color:var(--muted);font-size:11px}
+.sn-tag .rm:hover{color:var(--red)}
+/* FEEDBACK */
+.fb-row{display:flex;gap:6px;align-items:center;margin-top:4px}
+.fb-btn{background:transparent;border:1px solid var(--border);border-radius:3px;padding:3px 9px;color:var(--muted);cursor:pointer;font-size:11px;transition:.15s}
+.fb-btn:hover{border-color:var(--acc);color:var(--acc)}
+.fb-btn.ok{border-color:var(--green);color:var(--green)}
+.fb-btn.bad{border-color:var(--red);color:var(--red)}
+/* BUTTONS */
+.btn{border:none;padding:9px 16px;border-radius:4px;font-weight:500;cursor:pointer;font-size:12px;transition:.15s;font-family:'Onest'}
+.btn-acc{background:var(--acc);color:#000}
+.btn-acc:hover{background:var(--acc2)}
+.btn-sec{background:var(--surf2);color:var(--text);border:1px solid var(--border)}
+.btn-sec:hover{border-color:var(--acc)}
+.btn-block{width:100%}
+/* LOADER */
+#loader{display:none;position:absolute;inset:0;background:rgba(5,8,16,.88);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:12px}
+.spinner{border:3px solid rgba(245,166,35,.15);border-top:3px solid var(--acc);border-radius:50%;width:36px;height:36px;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* STATUS BAR */
+.statusbar{background:#07090F;border-top:1px solid var(--border);padding:5px 16px;font-size:10px;color:var(--muted);display:flex;gap:16px}
+.stat{display:flex;align-items:center;gap:5px}
+.stat-dot{width:6px;height:6px;border-radius:50%}
+/* CABINET VIEW */
+#cabinet-view{flex:1;overflow-y:auto;padding:16px;display:none;flex-direction:column;gap:14px}
+.cabinet-card{background:var(--surf);border:1px solid var(--border);border-radius:6px;padding:14px 16px}
+.cabinet-title{font-size:14px;font-weight:600;margin-bottom:4px}
+.cabinet-code{font-family:'JetBrains Mono';font-size:11px;color:var(--muted)}
+.pos-table{width:100%;font-size:11px;border-collapse:collapse;margin-top:10px}
+.pos-table th{background:var(--surf2);padding:6px 8px;text-align:left;font-weight:500;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--border)}
+.pos-table td{padding:6px 8px;border:1px solid var(--border);vertical-align:top}
+.pos-table tr:nth-child(even) td{background:#0D1526}
+/* CHECKLIST */
+.checklist{background:var(--surf);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.cl-row{display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--border);font-size:11px}
+.cl-row:last-child{border-bottom:none}
+.cl-icon{font-size:14px;flex-shrink:0}
+.cl-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cl-sn{font-family:'JetBrains Mono';color:var(--muted);font-size:10px}
+.cl-status{font-size:10px;padding:2px 7px;border-radius:3px}
+.cl-ok{background:#0A2A1A;color:var(--green)}
+.cl-miss{background:#2A0A0A;color:var(--red)}
+/* SCROLLBAR */
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">ПАСПОРТ.ЦИФ &nbsp;/&nbsp; UNIVERSAL</div>
+  <div class="header-right">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('passports')">Паспорта</button>
+      <button class="tab" onclick="switchTab('cabinet')">Шкаф</button>
+    </div>
+    <button class="btn btn-sec" onclick="exportExcel()" style="padding:6px 12px;font-size:11px">Экспорт Excel 1С</button>
+  </div>
+</header>
+
+<div class="main">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-hdr">
+      <span id="sidebar-title">База паспортов</span>
+      <span style="color:var(--acc);font-size:13px;cursor:pointer;font-weight:600" title="Добавить файл" onclick="triggerFileInput()">+</span>
+    </div>
+    <div class="list" id="main-list"></div>
+    <div style="padding:10px;border-top:1px solid var(--border)">
+      <button class="btn btn-acc btn-block" onclick="triggerFileInput()">+ Загрузить файл</button>
+      <input type="file" id="file-input" hidden accept=".pdf,image/*" multiple onchange="handleFiles(this.files)">
+    </div>
+  </div>
+
+  <!-- PASSPORT WORKSPACE -->
+  <div class="workspace" id="passport-ws">
+    <div class="viewer">
+      <div id="loader"><div class="spinner"></div><div style="font-size:11px;color:var(--acc)">АНАЛИЗ ДОКУМЕНТА...</div></div>
+      <div class="hint" id="hint" onclick="triggerFileInput()">
+        <div class="big">📄</div>
+        <div>Нажмите или перетащите файл</div>
+        <div class="sub" style="margin-top:6px">PDF, JPG, PNG · Поддержка любых форматов паспортов</div>
+      </div>
+      <img id="pdf-render">
+    </div>
+
+    <div class="editor" id="editor">
+      <!-- Основные данные -->
+      <div class="editor-section">
+        <div class="section-title">📋 Основные данные <span id="tip-badge"></span></div>
+        <div class="field"><label>Наименование изделия</label><input id="f-name" oninput="markEdited()"></div>
+        <div class="field"><label>Код документа (паспорт)</label><input id="f-doc" oninput="genBarcodeDebounced()"></div>
+        <div class="field"><label>Код заказа</label><input id="f-zakaz" oninput="markEdited()"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="field"><label>Дата выпуска</label><input id="f-date"></div>
+          <div class="field"><label>Дата приёмки ОТК</label><input id="f-date-otk"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div class="field"><label>Гарантия</label><input id="f-garantia"></div>
+          <div class="field"><label>Срок службы</label><input id="f-srok"></div>
+        </div>
+        <div class="field"><label>Сертификат соответствия</label><input id="f-sert" style="font-family:'JetBrains Mono';font-size:11px"></div>
+        <div class="fb-row">
+          <span style="font-size:10px;color:var(--muted)">Качество данных:</span>
+          <button class="fb-btn" id="fb-ok" onclick="setFeedback('ok')">✓ Верно</button>
+          <button class="fb-btn" id="fb-bad" onclick="setFeedback('bad')">✗ Ошибка</button>
+        </div>
+      </div>
+
+      <!-- Серийные номера -->
+      <div class="editor-section">
+        <div class="section-title">🔢 Серийные номера <span id="sn-count" style="color:var(--acc);font-size:11px"></span></div>
+        <div id="sn-tags"></div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input id="sn-input" placeholder="Добавить номер..." style="flex:1;font-family:'JetBrains Mono';font-size:11px" onkeydown="if(event.key==='Enter')addSN()">
+          <button class="btn btn-sec" onclick="addSN()" style="padding:6px 12px">+</button>
+        </div>
+      </div>
+
+      <!-- Штрихкод -->
+      <div class="editor-section" id="bc-section" style="display:none">
+        <div class="section-title">▌▌▌ Штрихкод</div>
+        <select id="bc-format" onchange="genBarcodeDebounced()" style="margin-bottom:8px;font-size:11px">
+          <option value="code128">Code 128 (рекомендуется)</option>
+          <option value="code39">Code 39</option>
+        </select>
+        <div class="bc-card">
+          <div class="bc-label" id="bc-label"></div>
+          <img id="bc-img">
+        </div>
+      </div>
+
+      <!-- Производитель -->
+      <div class="editor-section">
+        <div class="section-title">🏭 Производитель</div>
+        <div class="field"><label>Наименование</label><input id="f-manuf"></div>
+        <div class="field"><label>Адрес</label><textarea id="f-addr" rows="2"></textarea></div>
+        <div class="field"><label>Контакты</label><input id="f-contacts"></div>
+      </div>
+
+      <!-- Тех. характеристики -->
+      <div class="editor-section" id="tech-section" style="display:none">
+        <div class="section-title">⚙ Технические характеристики</div>
+        <table class="tech-table" id="tech-table"></table>
+      </div>
+
+      <!-- Нормативные документы -->
+      <div class="editor-section" id="norm-section" style="display:none">
+        <div class="section-title">📌 Нормативные документы</div>
+        <div id="norm-list" style="font-family:'JetBrains Mono';font-size:10px;line-height:1.8;color:var(--muted)"></div>
+      </div>
+
+      <!-- Сохранить -->
+      <div style="padding:12px 16px">
+        <button class="btn btn-acc btn-block" onclick="saveRecord()">Сохранить в реестр</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CABINET WORKSPACE -->
+  <div id="cabinet-ws" style="flex:1;display:none;flex-direction:column;overflow:hidden">
+    <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center;background:var(--surf);flex-shrink:0">
+      <button class="btn btn-acc" onclick="document.getElementById('cab-input').click()">Загрузить перечень шкафа</button>
+      <input type="file" id="cab-input" hidden accept=".pdf,image/*" onchange="parseCabinet(this.files[0])">
+      <div id="cab-status" style="font-size:11px;color:var(--muted)">Загрузите документ "Перечень документации шкафа"</div>
+    </div>
+    <div id="cabinet-view" style="display:flex"></div>
+  </div>
+</div>
+
+<div class="statusbar">
+  <div class="stat"><div class="stat-dot" style="background:var(--green)"></div><span id="st-count">0 паспортов в реестре</span></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--blue)"></div><span id="st-sns">0 серийных номеров</span></div>
+  <div class="stat"><div class="stat-dot" style="background:var(--yellow)"></div><span id="st-group">0 групповых</span></div>
+  <div class="stat" style="margin-left:auto"><span id="st-model" style="font-family:'JetBrains Mono';font-size:9px;color:var(--border)">llama3.2-vision · Ollama</span></div>
+</div>
+
+<script>
+let registry=[];
+let cabinetData=null;
+let activeIdx=null;
+let bcTimer=null;
+let currentFeedback=null;
+
+// ── UTILS ─────────────────────────────────────────────────────────────────
+function triggerFileInput(){document.getElementById('file-input').click()}
+function clearEditor(){
+  ['f-name','f-doc','f-zakaz','f-date','f-date-otk','f-garantia','f-srok','f-sert','f-manuf','f-addr','f-contacts','sn-input'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  document.getElementById('sn-tags').innerHTML='';
+  document.getElementById('sn-count').textContent='';
+  document.getElementById('bc-section').style.display='none';
+  document.getElementById('tech-section').style.display='none';
+  document.getElementById('norm-section').style.display='none';
+  document.getElementById('tip-badge').innerHTML='';
+  currentFeedback=null;
+  document.getElementById('fb-ok').className='fb-btn';
+  document.getElementById('fb-bad').className='fb-btn';
+}
+
+function markEdited(){
+  if(activeIdx!==null) registry[activeIdx]._edited=true;
+}
+
+function setFeedback(type){
+  currentFeedback=type;
+  document.getElementById('fb-ok').className='fb-btn'+(type==='ok'?' ok':'');
+  document.getElementById('fb-bad').className='fb-btn'+(type==='bad'?' bad':'');
+  if(activeIdx!==null) registry[activeIdx].feedback=type;
+}
+
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',(i===0&&tab==='passports')||(i===1&&tab==='cabinet')));
+  document.getElementById('passport-ws').style.display=tab==='passports'?'flex':'none';
+  document.getElementById('cabinet-ws').style.display=tab==='cabinet'?'flex':'none';
+  document.getElementById('sidebar-title').textContent=tab==='passports'?'База паспортов':'Шкаф';
+  document.getElementById('main-list').innerHTML='';
+  if(tab==='passports') renderList();
+  if(tab==='cabinet') renderCabinetList();
+}
+
+// ── FILE HANDLING ─────────────────────────────────────────────────────────
+async function handleFiles(files){
+  for(const f of Array.from(files)) await handleFile(f);
+}
+
+async function handleFile(file){
+  clearEditor();
+  document.getElementById('loader').style.display='flex';
+  document.getElementById('hint').style.display='none';
+  document.getElementById('pdf-render').style.display='none';
+
+  const fd1=new FormData(); fd1.append('file',file);
+  try{
+    // Preview
+    const prevRes=await fetch('/api/preview',{method:'POST',body:fd1});
+    const prevData=await prevRes.json();
+    const imgEl=document.getElementById('pdf-render');
+    imgEl.src='data:image/png;base64,'+prevData.image;
+    imgEl.style.display='block';
+
+    // Extract
+    const fd2=new FormData(); fd2.append('file',file);
+    const res=await fetch('/api/extract',{method:'POST',body:fd2});
+    const data=await res.json();
+    if(data.error) throw new Error(data.error);
+
+    // Сохраняем в реестр временно
+    const rec={...data, _fileName:file.name, _image:prevData.image, feedback:null, _edited:false};
+    registry.push(rec);
+    activeIdx=registry.length-1;
+    fillEditor(rec);
+    renderList();
+    updateStatus();
+  }catch(e){
+    alert('Ошибка анализа: '+e.message);
+    document.getElementById('hint').style.display='block';
+  }finally{
+    document.getElementById('loader').style.display='none';
+  }
+}
+
+// ── EDITOR ────────────────────────────────────────────────────────────────
+function fillEditor(rec){
+  document.getElementById('f-name').value    = rec.naimenovanie||'';
+  document.getElementById('f-doc').value     = rec.kod_dokumenta||'';
+  document.getElementById('f-zakaz').value   = rec.kod_zakaza||'';
+  document.getElementById('f-date').value    = rec.data_vypuska||'';
+  document.getElementById('f-date-otk').value= rec.data_priemki||'';
+  document.getElementById('f-garantia').value= rec.garantia||'';
+  document.getElementById('f-srok').value    = rec.srok_sluzhby||'';
+  document.getElementById('f-sert').value    = rec.sertifikat||'';
+  document.getElementById('f-manuf').value   = rec.proizvoditel||'';
+  document.getElementById('f-addr').value    = rec.adres||'';
+  document.getElementById('f-contacts').value= rec.kontakty||'';
+
+  // Тип паспорта
+  const tipMap={individual:'👤 Индивидуальный',group:'👥 Групповой',no_serial:'📄 Без с/н'};
+  const tipCol={individual:'badge-green',group:'badge-blue',no_serial:'badge-yellow'};
+  const tip=rec.tip_pasporta||'individual';
+  document.getElementById('tip-badge').innerHTML=`<span class="badge ${tipCol[tip]}">${tipMap[tip]||tip}</span>`;
+
+  // Серийные номера
+  renderSNs(rec.zavodskie_nomera||[]);
+
+  // Штрихкод
+  if(rec.barcode_b64){
+    document.getElementById('bc-img').src='data:image/png;base64,'+rec.barcode_b64;
+    document.getElementById('bc-label').textContent=rec.barcode_value||'';
+    document.getElementById('bc-section').style.display='block';
+  }
+
+  // Тех. характеристики
+  const tk=rec.tekh_kharakt||{};
+  if(Object.keys(tk).length>0){
+    const tbl=document.getElementById('tech-table');
+    tbl.innerHTML=Object.entries(tk).map(([k,v])=>
+      `<tr><td>${k}</td><td style="font-family:'JetBrains Mono';font-size:10px">${v}</td></tr>`
+    ).join('');
+    document.getElementById('tech-section').style.display='block';
+  }
+
+  // Нормативные документы
+  const nd=rec.normativnye_dok||[];
+  if(nd.length>0){
+    document.getElementById('norm-list').innerHTML=nd.map(d=>`• ${d}`).join('<br>');
+    document.getElementById('norm-section').style.display='block';
+  }
+
+  // Feedback
+  if(rec.feedback){
+    setFeedback(rec.feedback);
+  }
+}
+
+// ── SERIAL NUMBERS ────────────────────────────────────────────────────────
+function renderSNs(sns){
+  const c=document.getElementById('sn-tags');
+  c.innerHTML=sns.map((sn,i)=>
+    `<span class="sn-tag">${sn}<span class="rm" onclick="removeSN(${i})">×</span></span>`
+  ).join('');
+  document.getElementById('sn-count').textContent=sns.length>0?`(${sns.length})`:'';
+  if(activeIdx!==null) genBarcodeDebounced();
+}
+
+function addSN(){
+  const inp=document.getElementById('sn-input');
+  const v=inp.value.trim();
+  if(!v||activeIdx===null) return;
+  if(!registry[activeIdx].zavodskie_nomera) registry[activeIdx].zavodskie_nomera=[];
+  registry[activeIdx].zavodskie_nomera.push(v);
+  inp.value='';
+  renderSNs(registry[activeIdx].zavodskie_nomera);
+  renderList();
+  updateStatus();
+}
+
+function removeSN(i){
+  if(activeIdx===null) return;
+  registry[activeIdx].zavodskie_nomera.splice(i,1);
+  renderSNs(registry[activeIdx].zavodskie_nomera);
+  updateStatus();
+}
+
+// ── BARCODE ───────────────────────────────────────────────────────────────
+function genBarcodeDebounced(){
+  clearTimeout(bcTimer);
+  bcTimer=setTimeout(genBarcode,600);
+}
+
+async function genBarcode(){
+  const doc=document.getElementById('f-doc').value;
+  const sns=activeIdx!==null?(registry[activeIdx].zavodskie_nomera||[]):[];
+  const val=sns[0]||doc;
+  if(!val||val==='—') return;
+  const fmt=document.getElementById('bc-format').value;
+  try{
+    const res=await fetch('/api/barcode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:val,format:fmt})});
+    const d=await res.json();
+    if(d.barcode){
+      document.getElementById('bc-img').src='data:image/png;base64,'+d.barcode;
+      document.getElementById('bc-label').textContent=d.encoded_value||val;
+      document.getElementById('bc-section').style.display='block';
+      if(activeIdx!==null){
+        registry[activeIdx].barcode_b64=d.barcode;
+        registry[activeIdx].barcode_value=d.encoded_value;
+      }
+    }
+  }catch(e){}
+}
+
+// ── REGISTRY ──────────────────────────────────────────────────────────────
+function saveRecord(){
+  if(activeIdx===null) return;
+  registry[activeIdx]={
+    ...registry[activeIdx],
+    naimenovanie : document.getElementById('f-name').value,
+    kod_dokumenta: document.getElementById('f-doc').value,
+    kod_zakaza   : document.getElementById('f-zakaz').value,
+    data_vypuska : document.getElementById('f-date').value,
+    data_priemki : document.getElementById('f-date-otk').value,
+    garantia     : document.getElementById('f-garantia').value,
+    srok_sluzhby : document.getElementById('f-srok').value,
+    sertifikat   : document.getElementById('f-sert').value,
+    proizvoditel : document.getElementById('f-manuf').value,
+    adres        : document.getElementById('f-addr').value,
+    kontakty     : document.getElementById('f-contacts').value,
+    feedback     : currentFeedback,
+    _saved       : true
+  };
+  renderList();
+  updateStatus();
+
+  // Flash saved
+  const btn=document.querySelector('.btn-acc.btn-block');
+  const orig=btn.textContent;
+  btn.textContent='✓ Сохранено!';
+  btn.style.background='var(--green)';
+  setTimeout(()=>{btn.textContent=orig;btn.style.background='';},1500);
+}
+
+function renderList(){
+  const l=document.getElementById('main-list');
+  if(registry.length===0){l.innerHTML='<div style="color:var(--muted);font-size:11px;padding:12px 8px;text-align:center">Нет паспортов</div>';return;}
+  l.innerHTML=registry.map((r,i)=>{
+    const tipMap={individual:'👤',group:'👥',no_serial:'📄'};
+    const icon=tipMap[r.tip_pasporta]||'📄';
+    const snCount=r.zavodskie_nomera?.length||0;
+    const saved=r._saved?'<span style="color:var(--green);font-size:9px">●</span>':'<span style="color:var(--muted);font-size:9px">○</span>';
+    return `<div class="item ${activeIdx===i?'active':''}" onclick="selectRecord(${i})">
+      <div class="item-name">${saved} ${icon} ${r.naimenovanie||r._fileName||'—'}</div>
+      <div class="item-sub">${r.kod_dokumenta||'—'}</div>
+      <div>${snCount>0?`<span class="badge badge-blue">${snCount} с/н</span>`:''}</div>
+    </div>`;
+  }).join('');
+}
+
+function selectRecord(i){
+  activeIdx=i;
+  const rec=registry[i];
+  clearEditor();
+  if(rec._image){
+    document.getElementById('pdf-render').src='data:image/png;base64,'+rec._image;
+    document.getElementById('pdf-render').style.display='block';
+    document.getElementById('hint').style.display='none';
+  }
+  fillEditor(rec);
+  renderList();
+}
+
+// ── CABINET ───────────────────────────────────────────────────────────────
+async function parseCabinet(file){
+  document.getElementById('cab-status').textContent='Анализирую документ...';
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const res=await fetch('/api/parse_cabinet',{method:'POST',body:fd});
+    const data=await res.json();
+    if(data.error) throw new Error(data.error);
+    cabinetData=data;
+    document.getElementById('cab-status').textContent=`Шкаф: ${data.shkaf_naim||'—'} · ${data.pozicii?.length||0} позиций`;
+    renderCabinet(data);
+    renderCabinetList();
+  }catch(e){
+    document.getElementById('cab-status').textContent='Ошибка: '+e.message;
+  }
+}
+
+function renderCabinet(data){
+  const cv=document.getElementById('cabinet-view');
+  cv.style.display='flex';
+
+  // Совмещаем с реестром для чеклиста
+  const regDocs=new Set(registry.map(r=>r.kod_dokumenta).filter(Boolean));
+  const regSNs=new Set(registry.flatMap(r=>r.zavodskie_nomera||[]));
+
+  const matched=data.pozicii?.filter(p=>regSNs.has(p.zavodskoy_nomer)||regDocs.has(p.oboznachenie_dok)).length||0;
+  const total=data.pozicii?.length||0;
+
+  cv.innerHTML=`
+  <div style="padding:16px;width:100%;overflow-y:auto">
+    <div class="cabinet-card" style="margin-bottom:14px">
+      <div class="cabinet-title">${data.shkaf_naim||'Шкаф'}</div>
+      <div class="cabinet-code">Код: ${data.shkaf_kod||'—'} &nbsp;|&nbsp; Зав.№: ${data.shkaf_zav_nomer||'—'}</div>
+      <div style="margin-top:10px;display:flex;gap:10px">
+        <div style="background:var(--surf2);border-radius:4px;padding:6px 12px;font-size:11px">
+          Всего позиций: <strong>${total}</strong>
+        </div>
+        <div style="background:${matched===total&&total>0?'#0A2A1A':'#1A1000'};border-radius:4px;padding:6px 12px;font-size:11px;color:${matched===total&&total>0?'var(--green)':'var(--yellow)'}">
+          Сверено с реестром: <strong>${matched} / ${total}</strong>
+        </div>
+      </div>
+    </div>
+
+    <div class="cabinet-card">
+      <div class="section-title" style="margin-bottom:10px">Чек-лист документации</div>
+      <div class="checklist">
+        ${(data.pozicii||[]).map(p=>{
+          const found=regSNs.has(p.zavodskoy_nomer)||regDocs.has(p.oboznachenie_dok);
+          return `<div class="cl-row">
+            <span class="cl-icon">${found?'✅':'❌'}</span>
+            <div style="flex:1;min-width:0">
+              <div class="cl-name" title="${p.naimenovanie||''}">${p.nomer}. ${p.naimenovanie||'—'}</div>
+              <div class="cl-sn">${p.oboznachenie_dok||''} &nbsp; с/н: ${p.zavodskoy_nomer||'б/н'}</div>
+            </div>
+            <span class="cl-status ${found?'cl-ok':'cl-miss'}">${found?'В реестре':'Отсутствует'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderCabinetList(){
+  const l=document.getElementById('main-list');
+  if(!cabinetData){l.innerHTML='<div style="color:var(--muted);font-size:11px;padding:12px 8px;text-align:center">Загрузите перечень шкафа</div>';return;}
+  l.innerHTML=(cabinetData.pozicii||[]).map(p=>
+    `<div class="item"><div class="item-name">${p.nomer}. ${p.naimenovanie||'—'}</div><div class="item-sub">${p.zavodskoy_nomer||'б/н'}</div></div>`
+  ).join('');
+}
+
+// ── EXPORT ────────────────────────────────────────────────────────────────
+async function exportExcel(){
+  if(registry.length===0){alert('Реестр пуст');return;}
+  const payload={records:registry.filter(r=>r._saved||r.naimenovanie), cabinet:cabinetData||null};
+  const res=await fetch('/api/export/excel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const blob=await res.blob();
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='Паспорта_1С.xlsx'; a.click();
+}
+
+// ── STATUS ────────────────────────────────────────────────────────────────
+function updateStatus(){
+  const saved=registry.filter(r=>r._saved||r.naimenovanie).length;
+  const totalSNs=registry.reduce((s,r)=>s+(r.zavodskie_nomera?.length||0),0);
+  const grouped=registry.filter(r=>r.tip_pasporta==='group').length;
+  document.getElementById('st-count').textContent=`${saved} паспортов в реестре`;
+  document.getElementById('st-sns').textContent=`${totalSNs} серийных номеров`;
+  document.getElementById('st-group').textContent=`${grouped} групповых`;
+}
+
+// Drag&drop
+document.querySelector('.viewer')?.addEventListener('dragover',e=>{e.preventDefault();e.currentTarget.style.background='#0A1025'});
+document.querySelector('.viewer')?.addEventListener('dragleave',e=>{e.currentTarget.style.background=''});
+document.querySelector('.viewer')?.addEventListener('drop',e=>{e.preventDefault();e.currentTarget.style.background='';const f=e.dataTransfer.files[0];if(f)handleFile(f)});
+</script>
+</body>
+</html>
