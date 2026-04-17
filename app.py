@@ -14,7 +14,7 @@ import fitz
 import barcode
 from barcode.writer import ImageWriter
 import openpyxl
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageChops
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 import pytesseract
 from dotenv import load_dotenv
 
@@ -805,63 +805,6 @@ def _extract_dates(text: str, lines: List[str]) -> Tuple[str, str]:
     return date_release, date_accept
 
 
-def _extract_certificate_value(text: str, lines: List[str]) -> str:
-    patterns = [
-        r"\bЕАЭС\s*[A-ZА-Я0-9.\-\/]{6,}",
-        r"\bСДС\.[A-ZА-Я0-9.\-\/]{6,}",
-        r"\b(?:RU|РФ)\s*[A-ZА-Я0-9.\-\/]{5,}",
-    ]
-    for pat in patterns:
-        m = re.search(pat, text, flags=re.IGNORECASE)
-        if m:
-            return re.sub(r"\s{2,}", " ", m.group(0)).strip(" .,:;")
-
-    for idx, line in enumerate(lines):
-        if not re.search(r"\bсертификат\w*\b", line, flags=re.IGNORECASE):
-            continue
-        chunk = " ".join(lines[idx: min(len(lines), idx + 4)])
-        num = re.search(r"(?:№|N)\s*([A-ZА-Я0-9.\-\/]{5,})", chunk, flags=re.IGNORECASE)
-        if num:
-            return num.group(1).strip(" .,:;")
-
-    by_label = _extract_value_after_label(lines, [r"\bсертификат\w*\b"])
-    if not by_label:
-        return ""
-    s = by_label.strip(" .,:;")
-    if len(s) > 80 or len(s.split()) > 5:
-        return ""
-    if not re.search(r"\d", s):
-        return ""
-    s_norm = s.lower().replace("ё", "е")
-    if re.search(r"(соответств|лиценз|налич|услов|контролл|модул|шкаф|блок|перечн|документац)", s_norm):
-        return ""
-    if re.fullmatch(r"(соответстви[ея]|наличи[ея]|сертификат[а-я ]*)", s_norm, flags=re.IGNORECASE):
-        return ""
-    if not (
-        re.search(r"[A-ZА-Я0-9]{2,}[.\-/][A-ZА-Я0-9.\-/]{2,}", s, flags=re.IGNORECASE)
-        or re.search(r"(?:№|N)\s*[A-ZА-Я0-9.\-/]{5,}", s, flags=re.IGNORECASE)
-    ):
-        return ""
-    return s
-
-
-def _build_processing_hint(raw_text: str, doc_type: str, file_name: str = "") -> str:
-    text = (raw_text or "").lower().replace("ё", "е")
-    fname = (file_name or "").lower().replace("ё", "е")
-    merged = f"{text}\n{fname}"
-    if doc_type in {"single_passport", "group_passport"}:
-        return "Документ похож на паспорт/РЭ. Проверьте поля справа и сохраните запись."
-    if doc_type == "cabinet_list":
-        return "Документ похож на перечень шкафа. Лучше загружать его в режим «Шкаф» для сверки позиций."
-    if "служебная записка" in merged:
-        return "Это служебная записка, а не паспорт изделия. Поля паспорта автоматически не заполняются."
-    if "экранная форма" in merged or "исходной таблицы" in merged:
-        return "Это шаблон/экранная форма задания. Для извлечения паспортных данных загрузите именно паспорт или РЭ."
-    if "разбор паспорта" in merged:
-        return "Похоже на разбор/перечень для сверки. Откройте режим «Шкаф» и загрузите файл туда."
-    return "Документ не распознан как паспорт. Попробуйте загрузить паспорт/РЭ или перечень документации шкафа."
-
-
 def _normalize_ocr_ru_token(value: str) -> str:
     s = (value or "").upper().replace("Ё", "Е")
     s = s.translate({
@@ -881,23 +824,14 @@ def _normalize_ocr_ru_token(value: str) -> str:
     return re.sub(r"[^А-Я0-9]", "", s)
 
 
-def _extract_blue_stamp_layer(img_rgb: Image.Image) -> Image.Image:
-    r, g, b = img_rgb.split()
-    rg_avg = ImageChops.blend(r, g, 0.5)
-    blue = ImageChops.subtract(b, rg_avg)
-    return ImageOps.autocontrast(blue)
-
-
 def _date_from_roi(img: Image.Image, banned_dates: set) -> str:
     prepared = [
         img,
-        ImageEnhance.Contrast(img).enhance(1.8),
-        ImageEnhance.Sharpness(ImageEnhance.Contrast(img).enhance(1.9)).enhance(1.6),
-        img.point(lambda px: 255 if px > 145 else 0, mode="1").convert("L"),
+        ImageEnhance.Contrast(img).enhance(1.6),
         img.point(lambda px: 255 if px > 165 else 0, mode="1").convert("L"),
     ]
     for variant in prepared:
-        for psm in ("6", "11", "7"):
+        for psm in ("6", "11"):
             try:
                 txt = pytesseract.image_to_string(
                     variant,
@@ -915,20 +849,17 @@ def _date_from_roi(img: Image.Image, banned_dates: set) -> str:
 def _extract_release_date_from_page_image(page_img: bytes, banned_dates: Optional[set] = None) -> str:
     banned = set(banned_dates or set())
     try:
-        img_rgb = Image.open(io.BytesIO(page_img)).convert("RGB")
+        img = Image.open(io.BytesIO(page_img)).convert("L")
     except Exception:
         return ""
 
-    img = ImageOps.autocontrast(img_rgb.convert("L"))
-    blue_layer = _extract_blue_stamp_layer(img_rgb)
+    img = ImageOps.autocontrast(img)
     if img.width < 2200:
         scale = 2200 / float(max(1, img.width))
         img = img.resize((int(img.width * scale), int(img.height * scale)), Image.Resampling.LANCZOS)
-        blue_layer = blue_layer.resize((int(blue_layer.width * scale), int(blue_layer.height * scale)), Image.Resampling.LANCZOS)
     img = ImageEnhance.Sharpness(img).enhance(1.7)
-    blue_layer = ImageEnhance.Sharpness(blue_layer).enhance(1.5)
 
-    label_rois: List[Tuple[int, int, int, int]] = []
+    label_rois = []
     try:
         data = pytesseract.image_to_data(
             img,
@@ -958,27 +889,23 @@ def _extract_release_date_from_page_image(page_img: bytes, banned_dates: Optiona
             x2 = min(img.width, x + int(img.width * 0.55))
             y2 = min(img.height, y + int(img.height * 0.30))
             if x2 - x1 > 120 and y2 - y1 > 50:
-                label_rois.append((x1, y1, x2, y2))
+                label_rois.append(img.crop((x1, y1, x2, y2)))
     except Exception:
         label_rois = []
 
-    for box in label_rois:
-        for layer in (img, blue_layer):
-            found = _date_from_roi(layer.crop(box), banned)
-            if found:
-                return found
+    for roi in label_rois:
+        found = _date_from_roi(roi, banned)
+        if found:
+            return found
 
-    fallback_boxes = [
-        (0, int(img.height * 0.30), int(img.width * 0.72), int(img.height * 0.78)),
-        (0, int(img.height * 0.40), int(img.width * 0.80), int(img.height * 0.86)),
-        (0, int(img.height * 0.48), int(img.width * 0.70), int(img.height * 0.96)),
-        (int(img.width * 0.02), int(img.height * 0.52), int(img.width * 0.62), int(img.height * 0.90)),
+    fallback_rois = [
+        img.crop((0, int(img.height * 0.30), int(img.width * 0.72), int(img.height * 0.78))),
+        img.crop((0, int(img.height * 0.40), int(img.width * 0.80), int(img.height * 0.86))),
     ]
-    for box in fallback_boxes:
-        for layer in (img, blue_layer):
-            found = _date_from_roi(layer.crop(box), banned)
-            if found:
-                return found
+    for roi in fallback_rois:
+        found = _date_from_roi(roi, banned)
+        if found:
+            return found
     return ""
 
 
@@ -1083,7 +1010,7 @@ def _extract_structured_from_text(raw_text: str) -> Dict:
             doc_type = "single_passport"
     garantia = _extract_value_after_label(lines, [r"\bгарант\w*\b"])
     srok = _extract_value_after_label(lines, [r"\bсрок\s+служб\w*\b"])
-    sert = _extract_certificate_value(text, lines)
+    sert = _extract_value_after_label(lines, [r"сертификат"])
     date_release, date_accept = _extract_dates(text, lines)
 
     manufacturer = ""
@@ -1287,9 +1214,6 @@ def final_cleanup(data: Dict, raw_text: str = "") -> Dict:
         data["zavodskie_nomera"] = []
         data["normativnye_dok"] = []
         data["komplektnost"] = []
-    elif doc_type == "cabinet_list":
-        for key in ("garantia", "srok_sluzhby", "sertifikat", "data_vypuska", "data_priemki"):
-            data[key] = None
 
     if data.get("naimenovanie"):
         name = str(data.get("naimenovanie", "")).strip()
@@ -1354,11 +1278,6 @@ def extract():
             release_date = _extract_release_date_from_pages(pages, banned_dates=version_dates)
             if release_date:
                 final_result["data_vypuska"] = release_date
-        final_result["_hint"] = _build_processing_hint(
-            full_text,
-            str(final_result.get("document_type") or "unknown"),
-            file.filename or "",
-        )
         final_result["_meta"] = {
             "provider": provider,
             "model": active_model,
