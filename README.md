@@ -53,6 +53,12 @@ pip install -r requirements.txt
 python app.py
 ```
 
+Если `.env` отсутствует, создайте его из шаблона:
+
+```bash
+cp .env.example .env
+```
+
 Открыть в браузере:
 
 - `http://localhost:5000`

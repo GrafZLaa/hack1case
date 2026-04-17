@@ -20,10 +20,15 @@ Thumbs.db
 
 # Local runtime artifacts
 Registry.xlsx
-Паспорта_реестр.xlsx
+*.xlsx
 _pdf_audit_report.json
 _task1_text.txt
 
-# Local env overrides
+# Env files
+.env
 .env.local
 .env.*.local
+
+# Local datasets / sample inputs
+*.pdf
+control_samples.example.json
