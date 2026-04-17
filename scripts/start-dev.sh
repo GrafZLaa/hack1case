@@ -1,6 +1,13 @@
 #!/usr/bin/env sh
 set -eu
 
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+PROJECT_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_BASE="infra/docker-compose.yml"
+COMPOSE_DEV="infra/docker-compose.dev.yml"
+
+cd "$PROJECT_ROOT"
+
 if ! command -v docker >/dev/null 2>&1; then
   echo "[ERROR] Docker is not installed or not in PATH."
   exit 1
@@ -12,7 +19,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 echo "[1/4] Starting DEV mode with hot-reload..."
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" up -d --build
 
 ENABLE_LLM="1"
 OLLAMA_MODEL="llama3.2-vision"
@@ -35,7 +42,7 @@ esac
 echo "[2/4] Waiting for Ollama..."
 ATTEMPTS=0
 while [ "$ATTEMPTS" -lt 30 ]; do
-  if docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T ollama ollama list >/dev/null 2>&1; then
+  if docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" exec -T ollama ollama list >/dev/null 2>&1; then
     break
   fi
   ATTEMPTS=$((ATTEMPTS + 1))
@@ -44,7 +51,7 @@ done
 
 if [ "$ATTEMPTS" -ge 30 ]; then
   echo "[WARN] Ollama did not become ready in time. Skip model pull."
-  echo "Run later: docker compose -f docker-compose.yml -f docker-compose.dev.yml exec ollama ollama pull $OLLAMA_MODEL"
+  echo "Run later: docker compose -f $COMPOSE_BASE -f $COMPOSE_DEV exec ollama ollama pull $OLLAMA_MODEL"
   echo "[4/4] DEV mode ready. Open http://localhost:5000"
   exit 0
 fi
@@ -54,9 +61,9 @@ if [ -z "$OLLAMA_MODEL" ]; then
 fi
 
 echo "[3/4] Pulling model $OLLAMA_MODEL (if missing)..."
-if ! docker compose -f docker-compose.yml -f docker-compose.dev.yml exec -T ollama ollama pull "$OLLAMA_MODEL"; then
+if ! docker compose -f "$COMPOSE_BASE" -f "$COMPOSE_DEV" exec -T ollama ollama pull "$OLLAMA_MODEL"; then
   echo "[WARN] Could not pull model now."
-  echo "Run later: docker compose -f docker-compose.yml -f docker-compose.dev.yml exec ollama ollama pull $OLLAMA_MODEL"
+  echo "Run later: docker compose -f $COMPOSE_BASE -f $COMPOSE_DEV exec ollama ollama pull $OLLAMA_MODEL"
 fi
 
 echo "[4/4] DEV mode is ready. Code changes reload automatically."

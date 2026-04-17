@@ -2243,12 +2243,14 @@ def evaluate_control():
         if safe_name != filename:
             sample_reports.append({"index": idx, "filename": filename, "error": "unsafe filename"})
             continue
-        if not os.path.exists(safe_name):
+        candidate_paths = [safe_name, os.path.join("приложения", safe_name)]
+        source_path = next((p for p in candidate_paths if os.path.exists(p)), "")
+        if not source_path:
             sample_reports.append({"index": idx, "filename": filename, "error": "file not found"})
             continue
 
         try:
-            with open(safe_name, "rb") as fh:
+            with open(source_path, "rb") as fh:
                 predicted = _extract_document_payload(fh.read(), safe_name)
         except Exception as e:
             sample_reports.append({"index": idx, "filename": filename, "error": f"extract failed: {e}"})

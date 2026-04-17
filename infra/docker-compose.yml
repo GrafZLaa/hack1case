@@ -1,12 +1,12 @@
 services:
   app:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: infra/Dockerfile
     container_name: passport-cif-app
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     environment:
       FLASK_HOST: 0.0.0.0
       FLASK_PORT: 5000

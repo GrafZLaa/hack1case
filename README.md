@@ -21,7 +21,7 @@
   - `cabinet_list`;
   - `unknown`.
 - Работать в fallback-режиме без LLM, если Ollama недоступна.
-- Показывать источники распознавания по полям (страница + OCR-фрагмент).
+- Формировать источники распознавания по полям в API/Excel (страница + OCR-фрагмент).
 - Генерировать Code128.
 - Экспортировать реестр в Excel (включая `1C_Импорт`, `Чек-лист`, `Источники`).
 
@@ -50,7 +50,7 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -r requirements.txt
-python app.py
+python app/app.py
 ```
 
 Если `.env` отсутствует, создайте его из шаблона:
@@ -67,40 +67,40 @@ cp .env.example .env
 
 Самый простой вариант (one-click):
 
-- Windows: запустить `start.bat`
+- Windows: запустить `scripts\start.bat`
 - Linux/macOS:
-  1. `chmod +x start.sh stop.sh`
-  2. `./start.sh`
+  1. `chmod +x scripts/start.sh scripts/stop.sh`
+  2. `./scripts/start.sh`
 
 Остановка:
 
-- Windows: `stop.bat`
-- Linux/macOS: `./stop.sh`
+- Windows: `scripts\stop.bat`
+- Linux/macOS: `./scripts/stop.sh`
 
 DEV-режим (hot-reload, без постоянной пересборки):
 
-- Windows: `start-dev.bat`
+- Windows: `scripts\start-dev.bat`
 - Linux/macOS:
-  1. `chmod +x start-dev.sh stop-dev.sh`
-  2. `./start-dev.sh`
+  1. `chmod +x scripts/start-dev.sh scripts/stop-dev.sh`
+  2. `./scripts/start-dev.sh`
 
 Остановка DEV:
 
-- Windows: `stop-dev.bat`
-- Linux/macOS: `./stop-dev.sh`
+- Windows: `scripts\stop-dev.bat`
+- Linux/macOS: `./scripts/stop-dev.sh`
 
-В DEV-режиме изменения в `app.py` и `templates/index.html` подхватываются автоматически.
+В DEV-режиме изменения в `app/app.py` и `app/templates/index.html` подхватываются автоматически.
 
 1. Собрать и поднять сервисы:
 
 ```bash
-docker compose up -d --build
+docker compose -f infra/docker-compose.yml up -d --build
 ```
 
 2. Один раз скачать модель в Ollama (по умолчанию из `.env` это `llama3.2-vision`):
 
 ```bash
-docker compose exec ollama ollama pull llama3.2-vision
+docker compose -f infra/docker-compose.yml exec ollama ollama pull llama3.2-vision
 ```
 
 3. Проверить, что backend отвечает:
@@ -116,19 +116,19 @@ curl http://localhost:5000/api/meta
 Остановить:
 
 ```bash
-docker compose down
+docker compose -f infra/docker-compose.yml down
 ```
 
 Полная очистка (включая кэш моделей Ollama):
 
 ```bash
-docker compose down -v
+docker compose -f infra/docker-compose.yml down -v
 ```
 
 Режим только OCR (без LLM):
 
 - в `.env` поставить `ENABLE_LLM=0`;
-- запустить снова `docker compose up -d --build`.
+- запустить снова `docker compose -f infra/docker-compose.yml up -d --build`.
 
 ## Настройки (.env)
 
@@ -185,7 +185,7 @@ ENABLE_LLM=0
 ```bash
 curl -X POST http://localhost:5000/api/evaluate/control ^
   -H "Content-Type: application/json" ^
-  --data "@control_samples.example.json"
+  --data "{\"samples\":[{\"filename\":\"Приложение 2 к задаче 1 Паспорт с одним заводским номером.pdf\",\"expected\":{\"document_type\":\"single_passport\",\"zavodskie_nomera\":[\"G4M0821\"]}}]}"
 ```
 
 В ответе будут:
@@ -194,6 +194,8 @@ curl -X POST http://localhost:5000/api/evaluate/control ^
 - `error_rate_pct` — процент ошибок.
 - `per_field` — детализация по каждому полю.
 - `samples[].mismatches` — точные расхождения.
+
+`/api/evaluate/control` ищет файлы по имени сначала в корне проекта, затем в папке `приложения/`.
 
 ## Критерии оценки и покрытие
 
@@ -219,11 +221,13 @@ curl -X POST http://localhost:5000/api/evaluate/control ^
 
 ## Структура проекта
 
-- `app.py` — весь backend в одном файле.
-- `templates/index.html` — интерфейс.
+- `app/app.py` — backend.
+- `app/templates/index.html` — интерфейс.
+- `infra/` — Docker/Compose.
+- `scripts/` — скрипты запуска/остановки (prod/dev).
+- `приложения/` — локальные PDF-примеры для тестов.
 - `.env` — параметры работы.
 - `requirements.txt` — зависимости.
-- `control_samples.example.json` — пример контрольного набора для оценки точности.
 
 ## Трудности и как решали
 
