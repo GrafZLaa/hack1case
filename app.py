@@ -848,6 +848,23 @@ def _is_probable_serial(token: str) -> bool:
     return bool(re.search(r"\d{4,}", t))
 
 
+def _is_table_serial_candidate(token: str) -> bool:
+    t = _normalize_serial_token(token)
+    if not t:
+        return False
+    if re.fullmatch(r"\d{6,12}", t):
+        return True
+    if re.fullmatch(r"[A-Z]\d[A-Z]\d{3,8}", t):
+        return True
+    if not re.fullmatch(r"[A-Z0-9\-]{5,20}", t):
+        return False
+    digit_count = len(re.findall(r"\d", t))
+    letter_count = len(re.findall(r"[A-Z]", t))
+    if digit_count < 4:
+        return False
+    return letter_count <= digit_count
+
+
 def _normalize_serial_token(token: str) -> str:
     t = re.sub(r"\s+", "", str(token or "").upper()).strip(" .,;:()[]{}")
     return t.translate(CYR_TO_LAT_LOOKALIKE)
@@ -896,7 +913,9 @@ def _canonicalize_serial(token: str) -> str:
 
 def _extract_serials(text: str) -> List[str]:
     serials: List[str] = []
-    uppercase_text = re.sub(r"\s+", " ", text.upper())
+    raw_upper = (text or "").upper()
+    uppercase_text = re.sub(r"\s+", " ", raw_upper)
+    uppercase_lines = [re.sub(r"\s+", " ", line).strip() for line in raw_upper.splitlines() if line.strip()]
 
     labeled_pattern = r"ЗАВОД\w*\s*НОМЕР\s*[:;№\-–—]*\s*([A-ZА-Я0-9\-]{4,20})"
     labeled_matches = list(re.finditer(labeled_pattern, uppercase_text, flags=re.IGNORECASE))
@@ -905,17 +924,41 @@ def _extract_serials(text: str) -> List[str]:
         if _is_probable_serial(token):
             serials.append(token)
 
+    has_serial_labels = bool(
+        re.search(r"ЗАВОД\w*\s*НОМЕР|СЕРИЙН\w*\s*НОМЕР|ЗАВ\.\s*№", uppercase_text, flags=re.IGNORECASE)
+    )
     table_mode = (
         len(labeled_matches) > 1
         or bool(re.search(r"№\s*П/?П|ПЕРЕЧЕНЬ\s+ДОКУМЕНТАЦИИ|СТРАНИЦ\s*/\s*ЛИСТОВ", uppercase_text, flags=re.IGNORECASE))
     )
-    table_heading = re.search(r"ЗАВОД\w*\s*НОМЕР", uppercase_text, flags=re.IGNORECASE) if table_mode else None
-    if table_heading is not None:
-        tail = uppercase_text[table_heading.end() : table_heading.end() + 5000]
-        for token in re.findall(r"\b[A-ZА-Я0-9\-]{4,20}\b", tail):
-            corrected = _canonicalize_serial(token)
-            if _is_probable_serial(corrected):
-                serials.append(corrected)
+    if table_mode and uppercase_lines:
+        in_table = False
+        rows_after_header = 0
+        stop_line_re = re.compile(
+            r"\b(ДАТА\s+УПАК|ОТВЕТСТВЕН|ДАТА\s+ПРИЕМ|ТЕХНИЧЕСКИЙ\s+КОНТРОЛЬ|СВЕДЕНИЯ\s+О\s+ИЗГОТОВИТЕЛЕ)\b",
+            flags=re.IGNORECASE,
+        )
+        for line in uppercase_lines:
+            if re.search(r"ЗАВОД\w*\s*НОМЕР", line, flags=re.IGNORECASE):
+                in_table = True
+                rows_after_header = 0
+                continue
+            if not in_table:
+                continue
+            if stop_line_re.search(line):
+                in_table = False
+                continue
+            rows_after_header += 1
+            if rows_after_header > 180:
+                in_table = False
+                continue
+            for token in re.findall(r"\b[A-ZА-Я0-9\-]{5,20}\b", line):
+                corrected = _canonicalize_serial(token)
+                if re.fullmatch(r"\d{7,12}", corrected):
+                    serials.append(corrected)
+                    continue
+                if _is_probable_serial(corrected) and _is_table_serial_candidate(corrected):
+                    serials.append(corrected)
 
     numeric_tokens = re.findall(r"\b\d{7}\b", uppercase_text)
     if numeric_tokens:
@@ -929,10 +972,13 @@ def _extract_serials(text: str) -> List[str]:
         if len(repeated) >= 6:
             serials.extend(sorted(repeated))
 
-    for token in re.findall(r"\b[A-ZА-Я0-9\-]{5,20}\b", uppercase_text):
-        corrected = _canonicalize_serial(token)
-        if _is_probable_serial(corrected):
-            serials.append(corrected)
+    if not serials and has_serial_labels:
+        for m in re.finditer(r"(ЗАВОД\w*\s*НОМЕР|СЕРИЙН\w*\s*НОМЕР|ЗАВ\.\s*№)", uppercase_text, flags=re.IGNORECASE):
+            window = uppercase_text[m.end() : m.end() + 220]
+            for token in re.findall(r"\b[A-ZА-Я0-9\-]{5,20}\b", window):
+                corrected = _canonicalize_serial(token)
+                if _is_probable_serial(corrected):
+                    serials.append(corrected)
 
     return normalize_serials(serials)
 
@@ -1559,9 +1605,10 @@ def _sanitize_extracted_payload(payload: Dict) -> Dict:
     serials_raw = data.get("zavodskie_nomera") or []
     if not isinstance(serials_raw, list):
         serials_raw = [serials_raw]
+    allow_short_numeric_serial = doc_type in {"group_passport", "cabinet_list"}
     data["zavodskie_nomera"] = [
         s for s in normalize_serials(serials_raw)
-        if _is_probable_serial(s)
+        if _is_probable_serial(s) or (allow_short_numeric_serial and re.fullmatch(r"\d{7}", s))
     ]
 
     norm_raw = data.get("normativnye_dok") or []

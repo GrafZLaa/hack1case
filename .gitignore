@@ -1,0 +1,29 @@
+# Python cache / bytecode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+
+# Tooling cache
+.pytest_cache/
+.mypy_cache/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Local runtime artifacts
+Registry.xlsx
+Паспорта_реестр.xlsx
+_pdf_audit_report.json
+_task1_text.txt
+
+# Local env overrides
+.env.local
+.env.*.local

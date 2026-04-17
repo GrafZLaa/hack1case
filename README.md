@@ -71,6 +71,20 @@ python app.py
 - Windows: `stop.bat`
 - Linux/macOS: `./stop.sh`
 
+DEV-режим (hot-reload, без постоянной пересборки):
+
+- Windows: `start-dev.bat`
+- Linux/macOS:
+  1. `chmod +x start-dev.sh stop-dev.sh`
+  2. `./start-dev.sh`
+
+Остановка DEV:
+
+- Windows: `stop-dev.bat`
+- Linux/macOS: `./stop-dev.sh`
+
+В DEV-режиме изменения в `app.py` и `templates/index.html` подхватываются автоматически.
+
 1. Собрать и поднять сервисы:
 
 ```bash
