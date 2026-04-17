@@ -57,6 +57,59 @@ python app.py
 
 - `http://localhost:5000`
 
+## Запуск в Docker
+
+Самый простой вариант (one-click):
+
+- Windows: запустить `start.bat`
+- Linux/macOS:
+  1. `chmod +x start.sh stop.sh`
+  2. `./start.sh`
+
+Остановка:
+
+- Windows: `stop.bat`
+- Linux/macOS: `./stop.sh`
+
+1. Собрать и поднять сервисы:
+
+```bash
+docker compose up -d --build
+```
+
+2. Один раз скачать модель в Ollama (по умолчанию из `.env` это `llama3.2-vision`):
+
+```bash
+docker compose exec ollama ollama pull llama3.2-vision
+```
+
+3. Проверить, что backend отвечает:
+
+```bash
+curl http://localhost:5000/api/meta
+```
+
+4. Открыть UI:
+
+- `http://localhost:5000`
+
+Остановить:
+
+```bash
+docker compose down
+```
+
+Полная очистка (включая кэш моделей Ollama):
+
+```bash
+docker compose down -v
+```
+
+Режим только OCR (без LLM):
+
+- в `.env` поставить `ENABLE_LLM=0`;
+- запустить снова `docker compose up -d --build`.
+
 ## Настройки (.env)
 
 Базовые (уже есть в проекте):

@@ -2480,6 +2480,12 @@ def export_excel():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    debug = os.getenv("FLASK_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+    host = os.getenv("FLASK_HOST", "0.0.0.0").strip() or "0.0.0.0"
+    try:
+        port = int(os.getenv("FLASK_PORT", "5000"))
+    except ValueError:
+        port = 5000
+    app.run(debug=debug, host=host, port=port)
 
 
