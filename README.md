@@ -2,7 +2,10 @@
 ## Хакатон РТУ МИРЭА 2026 · Задача 1
 
 ### Возможности
-- **OCR через Claude Vision** — распознаёт паспорта в произвольном формате (одиночные, групповые, без номера)
+- **Гибридный OCR (Qwen2.5-VL + Tesseract + regex)** — распознаёт паспорта в произвольном формате (одиночные, групповые, без номера)
+- **Автовыбор лучшей Ollama-модели** — автоматически выбирает наиболее точную доступную vision-модель из приоритетного списка
+- **Устойчивый fallback без LLM** — даже при таймауте/ошибке модели извлекает поля по OCR+правилам (без `502`)
+- **Разбор перечня шкафа** — работает endpoint `/api/parse_cabinet` для чек-листа по документу шкафа
 - **Редактирование** — все поля корректируются вручную
 - **Генерация штрихкодов** Code 128
 - **Экспорт в Excel** — 3 листа: паспорта, перечень шкафа, характеристики
@@ -17,9 +20,17 @@ cd passport_system
 # 2. Установить зависимости
 pip install -r requirements.txt
 
-# 3. Задать API-ключ Anthropic
-export ANTHROPIC_API_KEY=sk-ant-...   # Linux/Mac
-set ANTHROPIC_API_KEY=sk-ant-...      # Windows
+# 3. Поднять Ollama и загрузить модель (рекомендуется минимум 32b)
+ollama pull qwen2.5vl:32b
+export OLLAMA_BASE_URL=http://localhost:11434   # Linux/Mac
+set OLLAMA_BASE_URL=http://localhost:11434      # Windows
+export OLLAMA_MODEL=qwen2.5vl:32b               # опционально
+export OLLAMA_MODEL_CANDIDATES=qwen2.5vl:72b,qwen2.5vl:32b,qwen2.5vl:7b,llama3.2-vision
+
+# Быстрый и стабильный режим для сканов (без LLM-запросов):
+export ENABLE_LLM=0
+export OCR_WORKERS=4
+export OCR_MAX_VARIANTS=2
 
 # 4. Запустить
 python app.py
@@ -38,12 +49,12 @@ http://localhost:5000
 
 ### Архитектура
 - **Backend**: Python Flask
-- **OCR**: Anthropic Claude claude-opus-4-5 (Vision)
+- **OCR**: Qwen2.5-VL (Ollama, multi-page) + Tesseract (rus+eng, multi-pass + image variants) + regex fallback
 - **Штрихкоды**: python-barcode (Code 128)
 - **Экспорт**: openpyxl
 - **Frontend**: HTML/CSS/JS (без фреймворков)
 
 ### Требования
 - Python 3.10+
-- ANTHROPIC_API_KEY
-- Интернет для Claude API (или локальный ollama — см. настройки)
+- Локальный Ollama (рекомендуемая модель: qwen2.5vl:32b или выше)
+- Опционально Tesseract OCR (для лучшей точности на сканах)
