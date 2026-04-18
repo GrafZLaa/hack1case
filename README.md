@@ -24,6 +24,11 @@
 - Формировать источники распознавания по полям в API/Excel (страница + OCR-фрагмент).
 - Генерировать Code128.
 - Экспортировать реестр в Excel (включая `1C_Импорт`, `Чек-лист`, `Источники`).
+- Сохранять/восстанавливать реестр между перезапусками страницы:
+  - локально в браузере;
+  - на backend в `data/registry_state.json`.
+- Запускать контрольный прогон качества по эталонному набору (`samples/control_samples.json`) из UI и API.
+- Работать полностью офлайн в интерфейсе (без внешних CDN-шрифтов).
 
 ## Стек
 
@@ -125,6 +130,8 @@ docker compose -f infra/docker-compose.yml down
 docker compose -f infra/docker-compose.yml down -v
 ```
 
+Примечание: в Docker реестр сохраняется в volume `infra_registry_data` (`/app/data` внутри контейнера).
+
 Режим только OCR (без LLM):
 
 - в `.env` поставить `ENABLE_LLM=0`;
@@ -152,6 +159,12 @@ OCR:
 ENABLE_LLM=0
 ```
 
+Настройки хранения состояния и контрольного набора:
+
+- `REGISTRY_STATE_FILE=data/registry_state.json`
+- `CONTROL_SAMPLES_FILE=samples/control_samples.json`
+- `MAX_REGISTRY_RECORDS=2000`
+
 ## API
 
 - `POST /api/preview` — страницы для предпросмотра.
@@ -160,7 +173,11 @@ ENABLE_LLM=0
 - `POST /api/barcode` — генерация штрихкода.
 - `POST /api/export/excel` — экспорт реестра.
 - `POST /api/evaluate/control` — расчет метрик точности/ошибок по контрольному набору.
+- `GET /api/evaluate/default` — быстрый контрольный прогон по `samples/control_samples.json`.
 - `GET /api/meta` — активная конфигурация/статус.
+- `GET /api/registry/load` — загрузка сохраненного реестра.
+- `POST /api/registry/save` — сохранение реестра.
+- `POST /api/registry/clear` — очистка сохраненного реестра.
 
 Пример запроса для `POST /api/evaluate/control`:
 
@@ -186,6 +203,12 @@ ENABLE_LLM=0
 curl -X POST http://localhost:5000/api/evaluate/control ^
   -H "Content-Type: application/json" ^
   --data "{\"samples\":[{\"filename\":\"Приложение 2 к задаче 1 Паспорт с одним заводским номером.pdf\",\"expected\":{\"document_type\":\"single_passport\",\"zavodskie_nomera\":[\"G4M0821\"]}}]}"
+```
+
+Быстрый запуск контрольного набора по умолчанию:
+
+```bash
+curl http://localhost:5000/api/evaluate/default
 ```
 
 В ответе будут:
@@ -226,6 +249,8 @@ curl -X POST http://localhost:5000/api/evaluate/control ^
 - `infra/` — Docker/Compose.
 - `scripts/` — скрипты запуска/остановки (prod/dev).
 - `приложения/` — локальные PDF-примеры для тестов.
+- `samples/control_samples.json` — эталонный контрольный набор для оценки точности.
+- `data/registry_state.json` — сохраненное состояние реестра (runtime).
 - `.env` — параметры работы.
 - `requirements.txt` — зависимости.
 
@@ -242,6 +267,7 @@ curl -X POST http://localhost:5000/api/evaluate/control ^
 
 - Если Ollama недоступна, приложение автоматически продолжает обработку в OCR+rules режиме.
 - Для очень плохих сканов точность зависит от качества изображения и языка OCR.
+- При перезагрузке страницы реестр можно восстановить кнопкой `Восстановить` (backend + browser fallback).
 
 ## Обратная связь
 

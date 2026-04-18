@@ -6,6 +6,8 @@ import re
 import traceback
 import logging
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -69,6 +71,9 @@ PREVIEW_RENDER_SCALE = max(1.0, float(os.getenv("PREVIEW_RENDER_SCALE", "2.2")))
 OLLAMA_TAGS_TIMEOUT_SEC = max(1, int(os.getenv("OLLAMA_TAGS_TIMEOUT_SEC", "3")))
 OLLAMA_MODEL_CACHE_TTL_SEC = max(5, int(os.getenv("OLLAMA_MODEL_CACHE_TTL_SEC", "60")))
 OLLAMA_HEALTH_FAIL_TTL_SEC = max(5, int(os.getenv("OLLAMA_HEALTH_FAIL_TTL_SEC", "25")))
+REGISTRY_STATE_FILE = os.getenv("REGISTRY_STATE_FILE", os.path.join("data", "registry_state.json"))
+CONTROL_SAMPLES_FILE = os.getenv("CONTROL_SAMPLES_FILE", os.path.join("samples", "control_samples.json"))
+MAX_REGISTRY_RECORDS = max(10, int(os.getenv("MAX_REGISTRY_RECORDS", "2000")))
 OCR_KEYWORDS = [
     "паспорт",
     "руководство",
@@ -156,6 +161,28 @@ Return strict JSON with fields:
 - data_vypuska
 - data_priemki
 """
+
+REGISTRY_SCALAR_FIELDS = [
+    "document_type",
+    "tip_pasporta",
+    "naimenovanie",
+    "kod_dokumenta",
+    "kod_zakaza",
+    "data_vypuska",
+    "data_priemki",
+    "proizvoditel",
+    "adres",
+    "kontakty",
+    "garantia",
+    "srok_sluzhby",
+    "sertifikat",
+    "_fileName",
+]
+REGISTRY_LIST_FIELDS = [
+    "zavodskie_nomera",
+    "normativnye_dok",
+    "komplektnost",
+]
 
 _ollama_model_cache = {
     "model": "",
@@ -981,6 +1008,22 @@ def _extract_serials(text: str) -> List[str]:
                     serials.append(corrected)
 
     return normalize_serials(serials)
+
+
+def _extract_labeled_factory_serials(text: str) -> List[str]:
+    if not text:
+        return []
+    upper = re.sub(r"\s+", " ", text.upper())
+    pattern = re.compile(
+        r"(?:ЗАВОД\w*\s*НОМЕР|СЕРИЙН\w*\s*НОМЕР|ЗАВ\.\s*№)\s*[:;№\-–—]*\s*([A-ZА-Я0-9\-]{4,20})",
+        flags=re.IGNORECASE,
+    )
+    found: List[str] = []
+    for m in pattern.finditer(upper):
+        token = _canonicalize_serial(m.group(1).strip())
+        if _is_probable_serial(token):
+            found.append(token)
+    return normalize_serials(found)
 
 
 def _is_date_like(value: str) -> bool:
@@ -1848,6 +1891,15 @@ def final_cleanup(data: Dict, raw_text: str = "", source_name: str = "") -> Dict
             if _normalize_serial_token(s) != kz_norm
         ]
     doc_type = (data.get("document_type") or "").strip().lower()
+    text_lower = (raw_text or "").lower().replace("ё", "е")
+    labeled_serials = _extract_labeled_factory_serials(raw_text)
+    has_group_markers = bool(re.search(r"\b(tcc8l|мфк1500|перечень\s+документации)\b", text_lower))
+    if doc_type in {"single_passport", "group_passport"} and len(labeled_serials) == 1 and not has_group_markers:
+        data["zavodskie_nomera"] = [labeled_serials[0]]
+        if doc_type == "group_passport":
+            data["document_type"] = "single_passport"
+            doc_type = "single_passport"
+
     if doc_type == "unknown":
         if heur.get("_allow_draft_passport"):
             data["document_type"] = "single_passport"
@@ -1860,6 +1912,17 @@ def final_cleanup(data: Dict, raw_text: str = "", source_name: str = "") -> Dict
     elif doc_type == "cabinet_list":
         for key in ("garantia", "srok_sluzhby", "sertifikat", "data_vypuska", "data_priemki"):
             data[key] = None
+
+    if doc_type == "single_passport":
+        serials = normalize_serials(data.get("zavodskie_nomera"))
+        if len(serials) > 1:
+            by_label = _extract_labeled_factory_serials(raw_text)
+            if by_label:
+                label_norm = {_normalize_serial_token(x) for x in by_label}
+                picked = [s for s in serials if _normalize_serial_token(s) in label_norm]
+                data["zavodskie_nomera"] = [picked[0] if picked else by_label[0]]
+            else:
+                data["zavodskie_nomera"] = [max(serials, key=_serial_plausibility_score)]
 
     if data.get("naimenovanie"):
         name = str(data.get("naimenovanie", "")).strip()
@@ -2194,37 +2257,207 @@ def meta():
     })
 
 
-@app.route("/api/evaluate/control", methods=["POST"])
-def evaluate_control():
-    payload = request.json or {}
-    samples = payload.get("samples") or []
-    if not isinstance(samples, list) or not samples:
-        return jsonify({"error": "Provide non-empty 'samples' list"}), 400
+def _project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
 
-    default_fields = [
-        "document_type",
-        "naimenovanie",
-        "kod_dokumenta",
-        "kod_zakaza",
-        "data_vypuska",
-        "data_priemki",
-        "proizvoditel",
-        "adres",
-        "kontakty",
-        "garantia",
-        "srok_sluzhby",
-        "sertifikat",
-        "zavodskie_nomera",
-    ]
-    fields = payload.get("fields") or default_fields
-    if not isinstance(fields, list) or not all(isinstance(x, str) for x in fields):
-        return jsonify({"error": "'fields' must be a list of strings"}), 400
 
+def _registry_path() -> Path:
+    configured = Path(REGISTRY_STATE_FILE)
+    return configured if configured.is_absolute() else (_project_root() / configured)
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _clean_registry_scalar(value: Any, max_len: int = 220) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()[:max_len]
+
+
+def _normalize_registry_cabinet(payload: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    result = {
+        "shkaf_naim": _clean_registry_scalar(payload.get("shkaf_naim"), max_len=200),
+        "shkaf_kod": _clean_registry_scalar(payload.get("shkaf_kod"), max_len=80),
+        "shkaf_zav_nomer": _clean_registry_scalar(payload.get("shkaf_zav_nomer"), max_len=80),
+        "pozicii": [],
+    }
+    positions = payload.get("pozicii") or []
+    if isinstance(positions, list):
+        for item in positions[:1000]:
+            if not isinstance(item, dict):
+                continue
+            result["pozicii"].append({
+                "nomer": int(item.get("nomer")) if str(item.get("nomer", "")).isdigit() else len(result["pozicii"]) + 1,
+                "naimenovanie": _clean_registry_scalar(item.get("naimenovanie"), max_len=220),
+                "zavodskoy_nomer": _clean_registry_scalar(item.get("zavodskoy_nomer"), max_len=80),
+                "oboznachenie_dok": _clean_registry_scalar(item.get("oboznachenie_dok"), max_len=80),
+            })
+    if not result["shkaf_naim"] and not result["pozicii"]:
+        return None
+    return result
+
+
+def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
+    if not isinstance(raw, dict):
+        return None
+
+    rec: Dict[str, Any] = {}
+    for key in REGISTRY_SCALAR_FIELDS:
+        rec[key] = _clean_registry_scalar(raw.get(key))
+    for key in REGISTRY_LIST_FIELDS:
+        val = raw.get(key)
+        if not isinstance(val, list):
+            val = [val] if val is not None else []
+        rec[key] = [_clean_registry_scalar(x, max_len=120) for x in val if _clean_registry_scalar(x, max_len=120)]
+
+    allowed_doc_types = {"single_passport", "group_passport", "cabinet_list", "unknown"}
+    rec["document_type"] = rec["document_type"].lower() if rec["document_type"] else "unknown"
+    if rec["document_type"] not in allowed_doc_types:
+        rec["document_type"] = "unknown"
+
+    rec["zavodskie_nomera"] = normalize_serials(rec.get("zavodskie_nomera") or [])
+    rec["normativnye_dok"] = list(dict.fromkeys(rec.get("normativnye_dok") or []))[:40]
+    rec["komplektnost"] = list(dict.fromkeys(rec.get("komplektnost") or []))[:40]
+
+    if rec["document_type"] == "group_passport":
+        rec["tip_pasporta"] = "group"
+    elif rec["zavodskie_nomera"]:
+        rec["tip_pasporta"] = "individual"
+    else:
+        rec["tip_pasporta"] = "no_serial"
+
+    if not rec.get("_fileName"):
+        rec["_fileName"] = f"record_{idx}"
+
+    for key in REGISTRY_SCALAR_FIELDS:
+        if key in {"document_type", "tip_pasporta", "_fileName"}:
+            continue
+        if not rec.get(key):
+            rec[key] = None
+
+    rec["_saved"] = bool(raw.get("_saved"))
+    rec["_edited"] = bool(raw.get("_edited"))
+
+    if isinstance(raw.get("barcode_b64"), str) and 0 < len(raw["barcode_b64"]) <= 450000:
+        rec["barcode_b64"] = raw["barcode_b64"]
+    if isinstance(raw.get("barcode_value"), str):
+        rec["barcode_value"] = _clean_registry_scalar(raw.get("barcode_value"), max_len=80)
+    if isinstance(raw.get("_image"), str) and 0 < len(raw["_image"]) <= 450000:
+        rec["_image"] = raw["_image"]
+
+    view_zoom_raw = raw.get("_viewZoom")
+    view_rotation_raw = raw.get("_viewRotation")
+    view_page_raw = raw.get("_viewPage")
+    view_rotations_raw = raw.get("_viewRotations")
+    if isinstance(view_zoom_raw, (int, float)):
+        rec["_viewZoom"] = max(0.4, min(4.0, float(view_zoom_raw)))
+    if isinstance(view_rotation_raw, (int, float)):
+        rec["_viewRotation"] = float(view_rotation_raw)
+    if isinstance(view_page_raw, int) and view_page_raw >= 0:
+        rec["_viewPage"] = view_page_raw
+    if isinstance(view_rotations_raw, list):
+        rec["_viewRotations"] = [
+            float(v) for v in view_rotations_raw[:200]
+            if isinstance(v, (int, float))
+        ]
+
+    quality_score, missing_fields, needs_review = _quality_assessment(rec)
+    rec["quality_score"] = quality_score
+    rec["missing_fields"] = missing_fields
+    rec["needs_review"] = needs_review
+    rec["_checklist"] = _build_record_checklist(rec)
+    return rec
+
+
+def _registry_empty_state() -> Dict[str, Any]:
+    return {
+        "version": 1,
+        "mode": "p",
+        "active_index": None,
+        "records": [],
+        "cabinet": None,
+        "updated_at": _utc_now_iso(),
+    }
+
+
+def _normalize_registry_state(payload: Any) -> Dict[str, Any]:
+    base = payload.get("state") if isinstance(payload, dict) and isinstance(payload.get("state"), dict) else payload
+    if not isinstance(base, dict):
+        return _registry_empty_state()
+
+    records: List[Dict[str, Any]] = []
+    raw_records = base.get("records") or []
+    if isinstance(raw_records, list):
+        for idx, item in enumerate(raw_records[:MAX_REGISTRY_RECORDS], start=1):
+            normalized = _normalize_registry_record(item, idx)
+            if normalized:
+                records.append(normalized)
+
+    cabinet = _normalize_registry_cabinet(base.get("cabinet"))
+    mode = "c" if str(base.get("mode", "p")).lower() == "c" else "p"
+    active_index_raw = base.get("active_index")
+    active_index = active_index_raw if isinstance(active_index_raw, int) else None
+    if active_index is not None and (active_index < 0 or active_index >= len(records)):
+        active_index = None
+
+    return {
+        "version": 1,
+        "mode": mode,
+        "active_index": active_index,
+        "records": records,
+        "cabinet": cabinet,
+        "updated_at": _utc_now_iso(),
+    }
+
+
+def _load_registry_state() -> Dict[str, Any]:
+    path = _registry_path()
+    if not path.exists():
+        return _registry_empty_state()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as e:
+        log.warning("Failed to read registry state: %s", e)
+        return _registry_empty_state()
+    return _normalize_registry_state(payload)
+
+
+def _save_registry_state(payload: Any) -> Dict[str, Any]:
+    state = _normalize_registry_state(payload)
+    path = _registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp_path, path)
+    return state
+
+
+EVAL_DEFAULT_FIELDS = [
+    "document_type",
+    "naimenovanie",
+    "kod_dokumenta",
+    "kod_zakaza",
+    "data_vypuska",
+    "data_priemki",
+    "proizvoditel",
+    "adres",
+    "kontakty",
+    "garantia",
+    "srok_sluzhby",
+    "sertifikat",
+    "zavodskie_nomera",
+]
+
+
+def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[str, Any]:
     total_checks = 0
     matched_checks = 0
     per_field = {f: {"total": 0, "matched": 0} for f in fields}
     sample_reports = []
 
+    root = _project_root()
     for idx, sample in enumerate(samples, start=1):
         if not isinstance(sample, dict):
             sample_reports.append({"index": idx, "error": "sample must be object"})
@@ -2243,14 +2476,18 @@ def evaluate_control():
         if safe_name != filename:
             sample_reports.append({"index": idx, "filename": filename, "error": "unsafe filename"})
             continue
-        candidate_paths = [safe_name, os.path.join("приложения", safe_name)]
-        source_path = next((p for p in candidate_paths if os.path.exists(p)), "")
+
+        candidate_paths = [
+            root / safe_name,
+            root / "приложения" / safe_name,
+        ]
+        source_path = next((p for p in candidate_paths if p.exists()), None)
         if not source_path:
             sample_reports.append({"index": idx, "filename": filename, "error": "file not found"})
             continue
 
         try:
-            with open(source_path, "rb") as fh:
+            with source_path.open("rb") as fh:
                 predicted = _extract_document_payload(fh.read(), safe_name)
         except Exception as e:
             sample_reports.append({"index": idx, "filename": filename, "error": f"extract failed: {e}"})
@@ -2304,8 +2541,7 @@ def evaluate_control():
 
     accuracy_pct = round((matched_checks / total_checks * 100.0), 2) if total_checks else 0.0
     error_rate_pct = round((100.0 - accuracy_pct), 2) if total_checks else 0.0
-
-    return jsonify({
+    return {
         "total_samples": len(samples),
         "total_checks": total_checks,
         "matched_checks": matched_checks,
@@ -2313,7 +2549,87 @@ def evaluate_control():
         "error_rate_pct": error_rate_pct,
         "per_field": per_field_result,
         "samples": sample_reports,
+    }
+
+
+@app.route("/api/registry/load", methods=["GET"])
+def registry_load():
+    return jsonify(_load_registry_state())
+
+
+@app.route("/api/registry/save", methods=["POST"])
+def registry_save():
+    payload = request.json or {}
+    try:
+        state = _save_registry_state(payload)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to save registry: {e}"}), 500
+    return jsonify({
+        "ok": True,
+        "updated_at": state.get("updated_at"),
+        "records_count": len(state.get("records") or []),
+        "state": state,
     })
+
+
+@app.route("/api/registry/clear", methods=["POST"])
+def registry_clear():
+    path = _registry_path()
+    try:
+        if path.exists():
+            path.unlink()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to clear registry: {e}"}), 500
+    return jsonify({
+        "ok": True,
+        "state": _registry_empty_state(),
+    })
+
+
+@app.route("/api/evaluate/control", methods=["POST"])
+def evaluate_control():
+    payload = request.json or {}
+    samples = payload.get("samples") or []
+    if not isinstance(samples, list) or not samples:
+        return jsonify({"error": "Provide non-empty 'samples' list"}), 400
+
+    fields = payload.get("fields") or EVAL_DEFAULT_FIELDS
+    if not isinstance(fields, list) or not all(isinstance(x, str) for x in fields):
+        return jsonify({"error": "'fields' must be a list of strings"}), 400
+    return jsonify(_evaluate_samples(samples, fields))
+
+
+@app.route("/api/evaluate/default", methods=["GET"])
+def evaluate_default():
+    root = _project_root()
+    configured = Path(CONTROL_SAMPLES_FILE)
+    candidates = [configured if configured.is_absolute() else (root / configured)]
+    candidates.extend([
+        root / "samples" / "control_samples.json",
+        root / "control_samples.json",
+        root / "control_samples.example.json",
+    ])
+    source = next((p for p in candidates if p.exists()), None)
+    if not source:
+        return jsonify({"error": "Control samples file not found", "searched": [str(p) for p in candidates]}), 404
+
+    try:
+        payload = json.loads(source.read_text(encoding="utf-8"))
+    except Exception as e:
+        return jsonify({"error": f"Failed to parse control samples: {e}", "path": str(source)}), 400
+
+    samples = payload.get("samples") if isinstance(payload, dict) else payload
+    fields = payload.get("fields") if isinstance(payload, dict) else EVAL_DEFAULT_FIELDS
+    if not isinstance(samples, list) or not samples:
+        return jsonify({"error": "Control samples must be a non-empty list", "path": str(source)}), 400
+    if not isinstance(fields, list) or not all(isinstance(x, str) for x in fields):
+        fields = EVAL_DEFAULT_FIELDS
+
+    report = _evaluate_samples(samples, fields)
+    report["source_file"] = str(source)
+    return jsonify(report)
 
 
 @app.route("/api/export/excel", methods=["POST"])

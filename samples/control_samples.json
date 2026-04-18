@@ -1,0 +1,47 @@
+{
+  "fields": [
+    "document_type",
+    "kod_dokumenta",
+    "naimenovanie",
+    "kod_zakaza",
+    "zavodskie_nomera",
+    "data_vypuska"
+  ],
+  "samples": [
+    {
+      "filename": "Приложение 1 к задаче 1 Паспорт без заводского номера.pdf",
+      "expected": {
+        "document_type": "single_passport",
+        "kod_dokumenta": "ГЖИК.434434.032 РЭ",
+        "naimenovanie": "Розетка OptiDin РА10/16-502-Д-УХЛ4"
+      }
+    },
+    {
+      "filename": "Приложение 2 к задаче 1 Паспорт с одним заводским номером.pdf",
+      "expected": {
+        "document_type": "single_passport",
+        "kod_dokumenta": "TREI.421457.001 ПС",
+        "naimenovanie": "Мастер-модуль М1201Е",
+        "kod_zakaza": "M1201E-0",
+        "zavodskie_nomera": [
+          "G4M0821"
+        ]
+      }
+    },
+    {
+      "filename": "Приложение 3 к задаче 1 Групповой паспорт TECON TCC 8L 1.pdf",
+      "expected": {
+        "document_type": "group_passport",
+        "kod_dokumenta": "БНРД.434400.046 ПС",
+        "data_vypuska": "10.07.2024"
+      }
+    },
+    {
+      "filename": "Приложение 4 к задаче 1 Разбор паспорта.pdf",
+      "expected": {
+        "document_type": "cabinet_list",
+        "kod_dokumenta": "БНРД.426436.052 ПС"
+      }
+    }
+  ]
+}

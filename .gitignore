@@ -23,6 +23,8 @@ Registry.xlsx
 *.xlsx
 _pdf_audit_report.json
 _task1_text.txt
+data/registry_state.json
+samples/control_samples.local.json
 
 # Env files
 .env

@@ -1,4 +1,4 @@
-.git
+﻿.git
 .gitignore
 .venv
 __pycache__
@@ -15,4 +15,6 @@ __pycache__
 .DS_Store
 Thumbs.db
 Registry.xlsx
-приложения
+приложения/
+data/registry_state.json
+samples/control_samples.local.json
