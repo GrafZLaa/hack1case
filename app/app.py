@@ -74,6 +74,7 @@ OLLAMA_HEALTH_FAIL_TTL_SEC = max(5, int(os.getenv("OLLAMA_HEALTH_FAIL_TTL_SEC", 
 REGISTRY_STATE_FILE = os.getenv("REGISTRY_STATE_FILE", os.path.join("data", "registry_state.json"))
 CONTROL_SAMPLES_FILE = os.getenv("CONTROL_SAMPLES_FILE", os.path.join("samples", "control_samples.json"))
 MAX_REGISTRY_RECORDS = max(10, int(os.getenv("MAX_REGISTRY_RECORDS", "2000")))
+REGISTRY_B64_MAX = max(300000, int(os.getenv("REGISTRY_B64_MAX", "2500000")))
 OCR_KEYWORDS = [
     "паспорт",
     "руководство",
@@ -2340,11 +2341,11 @@ def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
     rec["_saved"] = bool(raw.get("_saved"))
     rec["_edited"] = bool(raw.get("_edited"))
 
-    if isinstance(raw.get("barcode_b64"), str) and 0 < len(raw["barcode_b64"]) <= 450000:
+    if isinstance(raw.get("barcode_b64"), str) and 0 < len(raw["barcode_b64"]) <= REGISTRY_B64_MAX:
         rec["barcode_b64"] = raw["barcode_b64"]
     if isinstance(raw.get("barcode_value"), str):
         rec["barcode_value"] = _clean_registry_scalar(raw.get("barcode_value"), max_len=80)
-    if isinstance(raw.get("_image"), str) and 0 < len(raw["_image"]) <= 450000:
+    if isinstance(raw.get("_image"), str) and 0 < len(raw["_image"]) <= REGISTRY_B64_MAX:
         rec["_image"] = raw["_image"]
 
     view_zoom_raw = raw.get("_viewZoom")

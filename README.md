@@ -164,6 +164,7 @@ ENABLE_LLM=0
 - `REGISTRY_STATE_FILE=data/registry_state.json`
 - `CONTROL_SAMPLES_FILE=samples/control_samples.json`
 - `MAX_REGISTRY_RECORDS=2000`
+- `REGISTRY_B64_MAX=2500000` — лимит base64-полей предпросмотра в сохраненной сессии.
 
 ## API
 
