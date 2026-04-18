@@ -74,7 +74,8 @@ OLLAMA_HEALTH_FAIL_TTL_SEC = max(5, int(os.getenv("OLLAMA_HEALTH_FAIL_TTL_SEC", 
 REGISTRY_STATE_FILE = os.getenv("REGISTRY_STATE_FILE", os.path.join("data", "registry_state.json"))
 CONTROL_SAMPLES_FILE = os.getenv("CONTROL_SAMPLES_FILE", os.path.join("samples", "control_samples.json"))
 MAX_REGISTRY_RECORDS = max(10, int(os.getenv("MAX_REGISTRY_RECORDS", "2000")))
-REGISTRY_B64_MAX = max(300000, int(os.getenv("REGISTRY_B64_MAX", "2500000")))
+REGISTRY_B64_MAX = max(12000000, int(os.getenv("REGISTRY_B64_MAX", "12000000")))
+REGISTRY_MAX_IMAGES = max(1000, int(os.getenv("REGISTRY_MAX_IMAGES", "1000")))
 OCR_KEYWORDS = [
     "паспорт",
     "руководство",
@@ -831,7 +832,11 @@ def _extract_normative_docs(text: str) -> List[str]:
     patterns = [
         r"\bГОСТ\s*[A-ZА-Я0-9.\-–/ ]{3,40}",
         r"\bТР\s*ТС\s*\d{3}/\d{4}\b",
+        r"\bТР\s*ЕАЭС\s*\d{3}/\d{4}\b",
         r"\b[А-ЯA-Z]{2,6}\.\d{3,6}\.\d{2,4}\s*ТУ\b",
+        r"\b(?:ОКПД|OKPD)\s*2[:\s]*\d{2}(?:\.\d{2,3}){1,4}\b",
+        r"\b(?:ОКВЭД|OKVED)\s*2[:\s]*\d{2}(?:\.\d{1,2}){0,3}\b",
+        r"\b(?:ТН\s*ВЭД|TN[\s-]*VED)(?:\s*(?:ЕАЭС|EAEU))?[:\s]*\d{6,10}\b",
     ]
     for pat in patterns:
         for m in re.finditer(pat, text, flags=re.IGNORECASE):
@@ -2255,6 +2260,8 @@ def meta():
         "ocr_tesseract_timeout_sec": OCR_TESSERACT_TIMEOUT_SEC,
         "ocr_date_tesseract_timeout_sec": OCR_DATE_TESSERACT_TIMEOUT_SEC,
         "ocr_release_scan_budget_sec": OCR_RELEASE_SCAN_BUDGET_SEC,
+        "registry_b64_max": REGISTRY_B64_MAX,
+        "registry_max_images": REGISTRY_MAX_IMAGES,
     })
 
 
@@ -2345,8 +2352,18 @@ def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
         rec["barcode_b64"] = raw["barcode_b64"]
     if isinstance(raw.get("barcode_value"), str):
         rec["barcode_value"] = _clean_registry_scalar(raw.get("barcode_value"), max_len=80)
-    if isinstance(raw.get("_image"), str) and 0 < len(raw["_image"]) <= REGISTRY_B64_MAX:
-        rec["_image"] = raw["_image"]
+
+    images: List[str] = []
+    raw_images = raw.get("_images")
+    if isinstance(raw_images, list):
+        for img in raw_images[:REGISTRY_MAX_IMAGES]:
+            if isinstance(img, str) and img:
+                images.append(img)
+    if not images and isinstance(raw.get("_image"), str) and raw["_image"]:
+        images = [raw["_image"]]
+    if images:
+        rec["_images"] = images
+        rec["_image"] = images[0]
 
     view_zoom_raw = raw.get("_viewZoom")
     view_rotation_raw = raw.get("_viewRotation")
@@ -2360,7 +2377,7 @@ def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
         rec["_viewPage"] = view_page_raw
     if isinstance(view_rotations_raw, list):
         rec["_viewRotations"] = [
-            float(v) for v in view_rotations_raw[:200]
+            float(v) for v in view_rotations_raw[:REGISTRY_MAX_IMAGES]
             if isinstance(v, (int, float))
         ]
 
