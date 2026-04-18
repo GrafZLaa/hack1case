@@ -1,240 +1,142 @@
 ﻿# ПАСПОРТ.ЦИФ
 
-Веб-приложение для извлечения значимых данных из PDF/сканов паспортов оборудования, проверки качества и выгрузки в Excel для последующей загрузки в учетные системы.
+Веб-приложение для автономного извлечения значимых данных из PDF/сканов паспортов оборудования, проверки качества извлечения и экспорта в Excel для последующей загрузки в учетные системы (включая подготовку данных для 1С).
 
-Проект рассчитан на автономную работу:
-- OCR + правила работают полностью локально.
-- LLM-слой опциональный и также локальный (через Ollama, без облачных API).
+Проект ориентирован на задачу хакатона: главная цель — корректно извлечь данные из готовых PDF и сформировать таблицу. Интеграция с 1С напрямую в этом репозитории не реализована, но данные и формат выгрузки для этого подготовлены.
 
-## Ключевые возможности
+## Что делает система
 
-### 1) Работа с документами
-- Загрузка `PDF` и изображений (`png/jpg/...`).
-- Очередь файлов: можно закинуть сразу несколько документов, они отображаются в перечне слева.
-- Два режима запуска обработки:
-  - индивидуально по выбранному файлу из очереди;
-  - пакетно по всей очереди (`Запустить очередь`).
-- Отложенный старт: анализ не начинается автоматически при загрузке.
-- Предпросмотр всех страниц документа:
-  - миниатюры;
-  - переход по страницам;
-  - `- / Fit / +`;
-  - поворот (сохраняется по страницам).
+1. Принимает PDF/изображения паспортов.
+2. Формирует предпросмотр всех страниц.
+3. Извлекает ключевые поля через OCR + правила, опционально усиливает результат локальной LLM (Ollama).
+4. Позволяет оператору вручную исправить/дополнить поля.
+5. Оценивает качество извлечения (`quality_score`, `needs_review`, чек-лист).
+6. Сохраняет реестр между перезапусками.
+7. Экспортирует реестр в многолистовый Excel.
+8. Поддерживает отдельный режим анализа перечня шкафа и сверки с реестром паспортов.
 
-### 2) Извлечение значимых данных
-Извлекаются поля:
-- наименование изделия;
-- код документа (паспорт);
-- код заказа;
-- дата выпуска;
-- дата приемки ОТК;
-- гарантия;
-- срок службы;
-- сертификат;
-- серийные номера;
-- производитель;
-- адрес;
-- контакты;
-- нормативные документы.
+## Ключевые возможности UI
 
-Классификация документа:
-- `single_passport`;
-- `group_passport`;
-- `cabinet_list`;
-- `unknown`.
+### Режим `Паспорта`
 
-### 3) UI и ручная валидация
-- Режимы: `Паспорта` / `Шкаф`.
-- Ручное редактирование всех ключевых полей.
-- Добавление/удаление серийных номеров вручную.
-- Автооценка качества (`quality_score`, `needs_review`, список пробелов).
-- Генерация штрихкода `Code128`.
-- Светлая/темная тема.
-- Подсказки по найденным кодам (`ОКПД2`, `ОКВЭД2`, `ТН ВЭД`, `ГОСТ`, `ТУ`, `СТО`, `ТР ТС/ЕАЭС`).
+- Загрузка одного или нескольких файлов (через кнопку и drag&drop).
+- Очередь файлов слева:
+  - выбрать конкретный файл для предпросмотра;
+  - запустить обработку одного выбранного файла;
+  - выбрать несколько файлов в очереди (чекбоксы);
+  - `Запустить выбранные`;
+  - `Удалить из очереди` (только отмеченные);
+  - `Запустить очередь` (все);
+  - `Очистить очередь` (все).
+- Предпросмотр документа:
+  - все страницы;
+  - миниатюры страниц;
+  - зум `- / Fit / +`;
+  - поворот (хранится по страницам);
+  - поддержка `Ctrl + колесо`, `Ctrl + +/-`, `Ctrl + 0`.
+- Правая панель редактирования:
+  - редактирование всех ключевых полей;
+  - ручное добавление/удаление серийных номеров;
+  - автогенерация штрихкода Code128 по основному значению;
+  - индикация качества и пробелов в данных.
+- Реестр:
+  - сохранение записи;
+  - удаление одной записи;
+  - множественное удаление отмеченных;
+  - удаление всех;
+  - сохранение/восстановление сессии;
+  - очистка сессии.
 
-### 4) Реестр и сохранение состояния
-- Сохранение/восстановление состояния:
-  - на backend: `data/registry_state.json`;
-  - в браузере (localStorage, как fallback).
-- В левой панели одновременно доступны:
-  - очередь на обработку;
-  - уже обработанные записи реестра.
-- После перезагрузки страницы реестр восстанавливается, но запись не открывается автоматически (пользователь выбирает вручную).
-- Удаление записей:
-  - по одной;
-  - выбранные (multi-select);
-  - все.
-- Сохранение многостраничных документов в реестре (`_images`) без потери страниц (настроечные лимиты в `.env`).
+### Режим `Шкаф`
 
-### 5) Выгрузка и контроль качества
-- Экспорт в Excel (несколько листов).
-- Контрольный прогон по эталонному набору (`samples/control_samples.json`) из UI и API.
-- Метрики: `accuracy_pct`, `error_rate_pct`, `per_field`, `mismatches`.
+- Загрузка документа перечня шкафа.
+- Выделение позиций (наименование/серийник/обозначение).
+- Сверка позиций со сформированным реестром (`OK/MISS`).
+- Экспорт шкафа в отдельный лист Excel вместе с реестром.
+
+### Дополнительно
+
+- Светлая/тёмная тема.
+- Кнопка `Контроль` для контрольного прогона на эталонных примерах.
+- Индикатор активной LLM-модели/провайдера в статус-баре.
+- Контакт обратной связи в футере.
+
+## Извлекаемые поля
+
+- `document_type`: `single_passport | group_passport | cabinet_list | unknown`
+- `tip_pasporta`: `individual | group | no_serial`
+- `naimenovanie`
+- `kod_dokumenta`
+- `kod_zakaza`
+- `data_vypuska`
+- `data_priemki`
+- `zavodskie_nomera[]`
+- `proizvoditel`
+- `adres`
+- `kontakty`
+- `garantia`
+- `srok_sluzhby`
+- `sertifikat`
+- `normativnye_dok[]`
+- `komplektnost[]`
+
+Сервис также формирует служебные поля:
+- `_meta` (данные о пайплайне и LLM/OCR);
+- `_checklist`;
+- `_evidence` (источники значений по полям);
+- `quality_score`, `missing_fields`, `needs_review`.
 
 ## Архитектура обработки
 
-1. `Preview`:
-- PDF рендерится в набор PNG-страниц.
+### 1) Preview layer
 
-2. OCR:
-- многошаговая предобработка изображения;
-- multi-pass Tesseract (`OCR_PSMS`);
-- эвристики и регулярные выражения по полям.
+- Для PDF рендерятся страницы (`PyMuPDF`) в PNG.
+- Для изображений используется исходный файл.
+- Возвращается `images[]` + `page_count`.
 
-3. LLM (опционально):
-- локальная Ollama-модель (vision), если `ENABLE_LLM=1`;
-- при ошибке/тайм-ауте автоматический fallback на OCR+rules.
+### 2) OCR layer
 
-4. Постобработка:
-- санитизация значений;
-- фильтрация шумовых кандидатов;
-- нормализация серийных номеров;
-- расчет качества и чек-листа.
+- Мультивариантная предобработка изображения.
+- Multi-pass Tesseract по нескольким PSM.
+- Параллельная OCR-обработка страниц (`OCR_WORKERS`).
+- Эвристики оценки качества OCR, ранний выход при хорошем результате.
 
-## Технологии
+### 3) Rules/Regex layer
 
-- `Flask`
-- `PyMuPDF` (рендер PDF)
-- `pytesseract` + `Pillow` (OCR)
-- `openpyxl` (Excel)
-- `python-barcode` (Code128)
-- `requests` (Ollama API)
+- Извлечение по лейблам и регулярным выражениям.
+- Нормализация и фильтрация серийных номеров.
+- Нормализация/фильтрация дат, гарантий, сроков, сертификатов.
+- Отдельные правила для групповых документов и шкафов.
 
-## Требования
+### 4) Optional LLM layer (локально)
 
-- Python 3.10+
-- Tesseract OCR (желательно `rus+eng`)
-- Docker Desktop (для Docker-запуска)
-- (Опционально) Ollama в контейнере, если нужен LLM-слой
+- Провайдер: Ollama (`/api/generate`), без выхода в облачные API.
+- Автовыбор модели из кандидатов (с кэшем и health-check).
+- Ограничение по времени и failover между моделями.
+- Fallback на OCR+rules при таймауте/ошибке.
 
-## Быстрый локальный запуск (без Docker)
+### 5) Post-processing & scoring
 
-```bash
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-# Linux/macOS
-# source .venv/bin/activate
+- Слияние правил/LLM и финальная санитизация payload.
+- Расчет качества записи.
+- Формирование чек-листа и evidence.
 
-pip install -r requirements.txt
-cp .env.example .env  # для Windows можно создать вручную
-python app/app.py
-```
+## Реестр и сохранение состояния
 
-Открыть: `http://localhost:5000`
+Состояние хранится двумя способами:
 
-## Запуск через Docker
+1. Backend-файл: `data/registry_state.json` (главный источник).
+2. Browser localStorage (fallback).
 
-### One-click скрипты
+Особенности:
+- Восстановление не открывает запись автоматически: пользователь выбирает вручную.
+- Многостраничные документы сохраняются полностью (`_images`) в пределах лимитов.
+- Сохраняются параметры просмотра (страница/зум/повороты).
 
-- Windows (prod): `scripts\start.bat`
-- Windows (dev hot-reload): `scripts\start-dev.bat`
-- Linux/macOS (prod): `./scripts/start.sh`
-- Linux/macOS (dev): `./scripts/start-dev.sh`
+## Excel-экспорт
 
-Остановка:
-- Windows: `scripts\stop.bat`, `scripts\stop-dev.bat`
-- Linux/macOS: `./scripts/stop.sh`, `./scripts/stop-dev.sh`
+`POST /api/export/excel` формирует файл с листами:
 
-### Ручной запуск
-
-```bash
-docker compose -f infra/docker-compose.yml up -d --build
-```
-
-Проверка:
-```bash
-curl http://localhost:5000/api/meta
-```
-
-Открыть UI:
-- `http://localhost:5000`
-
-Остановка:
-```bash
-docker compose -f infra/docker-compose.yml down
-```
-
-Полная очистка (включая volume):
-```bash
-docker compose -f infra/docker-compose.yml down -v
-```
-
-## Перенос на другой компьютер
-
-### Вариант A (рекомендуемый)
-
-1. Скопировать папку проекта целиком.
-2. Установить Docker Desktop.
-3. Создать/проверить `.env` (можно из `.env.example`).
-4. Запустить `scripts/start.bat` (Windows) или `./scripts/start.sh` (Linux/macOS).
-
-Что важно:
-- На первом запуске нужен интернет для загрузки Docker-образов и Ollama-модели.
-- Дальше можно работать офлайн (если все уже скачано).
-
-### Вариант B (без Docker)
-
-- Установить Python + Tesseract,
-- поставить зависимости из `requirements.txt`,
-- запустить `python app/app.py`.
-
-## Постоянство данных
-
-В Docker-режиме:
-- реестр хранится в volume `registry_data` (`/app/data` в контейнере),
-- Ollama-модели — в volume `ollama_data`.
-
-Это значит:
-- простое копирование папки проекта не переносит содержимое volume;
-- для полного переноса состояния/моделей нужен перенос Docker volume отдельно.
-
-## Конфигурация `.env`
-
-Базовые параметры:
-- `ENABLE_LLM=1` — включить локальный LLM-слой.
-- `OLLAMA_BASE_URL=http://localhost:11434`
-- `OLLAMA_MODEL=llama3.2-vision`
-- `OLLAMA_MODEL_CANDIDATES=...`
-
-OCR:
-- `OCR_LANG=rus+eng`
-- `OCR_PSMS=3,6,11`
-- `OCR_WORKERS=4`
-- `OCR_MAX_VARIANTS=2`
-
-Реестр:
-- `REGISTRY_STATE_FILE=data/registry_state.json`
-- `MAX_REGISTRY_RECORDS=2000`
-- `REGISTRY_B64_MAX=12000000`
-- `REGISTRY_MAX_IMAGES=1000`
-
-Контрольный набор:
-- `CONTROL_SAMPLES_FILE=samples/control_samples.json`
-
-Если нужен режим полностью без LLM:
-```env
-ENABLE_LLM=0
-```
-
-## API
-
-- `GET /` — UI
-- `POST /api/preview` — подготовка предпросмотра (все страницы)
-- `POST /api/extract` — извлечение данных из документа
-- `POST /api/parse_cabinet` — разбор перечня шкафа
-- `POST /api/barcode` — генерация Code128
-- `GET /api/meta` — активная конфигурация/статус
-- `GET /api/registry/load` — загрузка сохраненного реестра
-- `POST /api/registry/save` — сохранение реестра
-- `POST /api/registry/clear` — очистка сохраненного реестра
-- `POST /api/evaluate/control` — оценка на пользовательском наборе
-- `GET /api/evaluate/default` — оценка на наборе по умолчанию
-- `POST /api/export/excel` — экспорт в Excel
-
-## Структура Excel-экспорта
-
-Формируются листы:
 - `Паспорта`
 - `Серийные номера`
 - `Нормативы`
@@ -243,32 +145,373 @@ ENABLE_LLM=0
 - `Источники`
 - `Шкаф` (если есть данные шкафа)
 
-## Контроль качества
+В UI файл скачивается как `Паспорта_реестр.xlsx`.
+На backend имя вложения `Registry.xlsx`.
 
-`/api/evaluate/default` читает `samples/control_samples.json` и возвращает:
-- общую точность;
-- процент ошибок;
-- детализацию по полям;
-- список расхождений по каждому файлу.
+## API
 
-`/api/evaluate/control` позволяет передать собственный набор `samples` в JSON.
+### `GET /`
+UI приложения.
 
-## Структура проекта
+### `POST /api/preview`
+Подготовка предпросмотра файла.
 
-- `app/app.py` — backend, OCR/LLM/excel/API
-- `app/templates/index.html` — frontend
-- `infra/` — Dockerfile и compose
-- `scripts/` — старт/стоп (prod/dev)
-- `samples/control_samples.json` — эталонный набор
-- `приложения/` — локальные PDF-примеры
-- `data/` — runtime-данные (реестр)
-- `.env.example` — шаблон конфигурации
+- Request: `multipart/form-data`, поле `file`.
+- Response:
+
+```json
+{
+  "images": ["base64_png", "..."],
+  "image": "base64_png_first",
+  "page_count": 3
+}
+```
+
+### `POST /api/extract`
+Основное извлечение данных из файла.
+
+- Request: `multipart/form-data`, поле `file`.
+- Response: JSON записи (поля + служебные `_meta/_checklist/_evidence`).
+
+### `POST /api/parse_cabinet`
+Разбор перечня шкафа.
+
+- Request: `multipart/form-data`, поле `file`.
+- Response:
+
+```json
+{
+  "shkaf_naim": "...",
+  "shkaf_kod": "...",
+  "shkaf_zav_nomer": "...",
+  "pozicii": [
+    {
+      "nomer": 1,
+      "naimenovanie": "...",
+      "zavodskoy_nomer": "...",
+      "oboznachenie_dok": "..."
+    }
+  ]
+}
+```
+
+### `POST /api/barcode`
+Генерация штрихкода Code128.
+
+- Request JSON:
+
+```json
+{ "value": "TREI.421457.001" }
+```
+
+- Response JSON:
+
+```json
+{ "barcode": "base64_png", "encoded_value": "TREI-421457-001" }
+```
+
+### `GET /api/meta`
+Диагностика текущей конфигурации OCR/LLM.
+
+### `GET /api/registry/load`
+Загрузка реестра из `data/registry_state.json`.
+
+### `POST /api/registry/save`
+Сохранение реестра.
+
+- Request: объект state (или `{ state: ... }`).
+- Response: `{ ok, updated_at, records_count, state }`.
+
+### `POST /api/registry/clear`
+Очистка сохраненного реестра.
+
+### `POST /api/evaluate/control`
+Контрольный прогон по переданному набору.
+
+- Request JSON:
+
+```json
+{
+  "fields": ["naimenovanie", "kod_dokumenta"],
+  "samples": [
+    {
+      "filename": "Приложение 2 ...pdf",
+      "expected": {
+        "naimenovanie": "...",
+        "kod_dokumenta": "..."
+      }
+    }
+  ]
+}
+```
+
+### `GET /api/evaluate/default`
+Контрольный прогон по файлу по умолчанию.
+
+Поиск файла идет в порядке:
+1. `CONTROL_SAMPLES_FILE`
+2. `samples/control_samples.json`
+3. `control_samples.json`
+4. `control_samples.example.json`
+
+### `POST /api/export/excel`
+Экспорт реестра в Excel.
+
+- Request JSON:
+
+```json
+{
+  "records": [ ... ],
+  "cabinet": { ... }
+}
+```
+
+## Формат `samples/control_samples.json`
+
+Поддерживаются два варианта:
+
+1) Объект:
+
+```json
+{
+  "fields": ["naimenovanie", "kod_dokumenta", "zavodskie_nomera"],
+  "samples": [
+    {
+      "filename": "Приложение 2 к задаче 1 Паспорт с одним заводским номером.pdf",
+      "expected": {
+        "naimenovanie": "Мастер-модуль М1201Е",
+        "kod_dokumenta": "TREI.421457.001",
+        "zavodskie_nomera": ["G4M0821"]
+      }
+    }
+  ]
+}
+```
+
+2) Массив `samples` без оболочки (поля будут взяты по умолчанию).
+
+## Запуск проекта
+
+## Вариант 1 (рекомендуется): Docker
+
+Требования:
+- Docker Desktop;
+- интернет на первом запуске (скачивание образов/моделей).
+
+### Быстрый старт (prod)
+
+- Windows: `scripts\start.bat`
+- Linux/macOS: `./scripts/start.sh`
+
+Что делает скрипт:
+1. Проверяет Docker.
+2. Запускает `infra/docker-compose.yml`.
+3. Если LLM включен (`ENABLE_LLM != 0/false/no`) — ждет Ollama и выполняет `ollama pull` модели из `OLLAMA_MODEL`.
+4. Печатает URL `http://localhost:5000`.
+
+### Быстрый старт (dev hot-reload)
+
+- Windows: `scripts\start-dev.bat`
+- Linux/macOS: `./scripts/start-dev.sh`
+
+Dev-режим:
+- подключает `infra/docker-compose.dev.yml`;
+- монтирует проект в контейнер (`../:/app`);
+- запускает Flask с `--debug` и авто-перезапуском при изменении кода.
+
+### Остановка
+
+- prod: `scripts\stop.bat` или `./scripts/stop.sh`
+- dev: `scripts\stop-dev.bat` или `./scripts/stop-dev.sh`
+
+### Ручные команды Docker
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml down
+docker compose -f infra/docker-compose.yml down -v
+```
+
+## Вариант 2: локально без Docker
+
+Требования:
+- Python 3.10+;
+- Tesseract OCR (`rus+eng`);
+- зависимости из `requirements.txt`.
+
+Запуск:
+
+```bash
+python -m venv .venv
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+# Windows CMD
+# .\.venv\Scripts\activate.bat
+# Linux/macOS
+# source .venv/bin/activate
+
+pip install -r requirements.txt
+copy .env.example .env  # Windows
+# cp .env.example .env  # Linux/macOS
+python app/app.py
+```
+
+Открыть: `http://localhost:5000`
+
+## Переменные окружения (`.env`)
+
+Ниже полный перечень переменных, используемых приложением.
+
+### LLM / Ollama
+
+- `ENABLE_LLM` (default в коде: `0`): включение локальной LLM.
+- `OLLAMA_BASE_URL` (default: `http://localhost:11434`): URL Ollama API.
+- `OLLAMA_MODEL` (default: `qwen2.5vl:32b`): основная модель.
+- `OLLAMA_MODEL_CANDIDATES` (default: `qwen2.5vl:72b,qwen2.5vl:32b,qwen2.5vl:7b,llama3.2-vision`): кандидаты failover.
+- `MAX_LLM_IMAGES` (default: `4`): максимум страниц для LLM.
+- `LLM_PRIMARY_MAX_IMAGES` (default: `1`): страницы в первой попытке.
+- `LLM_IMAGE_MAX_SIDE` (default: `1600`): ограничение размера стороны изображения для LLM.
+- `LLM_TEXT_LIMIT` (default: `14000`): лимит OCR-текста для первичного LLM-запроса.
+- `LLM_RETRY_TEXT_LIMIT` (default: `7000`): лимит текста для ретрая.
+- `LLM_FALLBACK_TEXT_LIMIT` (default: `3200`): лимит текста для fallback-попытки.
+- `LLM_REQUEST_TIMEOUT` (default: `55`): таймаут запроса.
+- `LLM_CONNECT_TIMEOUT` (default: `5`): таймаут соединения.
+- `LLM_MODEL_FAILOVER_TRIES` (default: `1`): количество переходов между моделями.
+- `LLM_MAX_TOTAL_SEC` (default: `90`): общий бюджет времени на LLM-этап.
+- `OLLAMA_TAGS_TIMEOUT_SEC` (default: `3`): таймаут запроса тегов моделей.
+- `OLLAMA_MODEL_CACHE_TTL_SEC` (default: `60`): TTL кэша списка/выбора модели.
+- `OLLAMA_HEALTH_FAIL_TTL_SEC` (default: `25`): TTL cache для состояния “Ollama недоступна”.
+
+### OCR / Render
+
+- `TESSERACT_PATH` (Windows path по умолчанию): путь к tesseract.exe.
+- `OCR_LANG` (default: `rus+eng`): языки OCR.
+- `OCR_PSMS` (default: `3,6,11`): режимы Tesseract.
+- `OCR_WORKERS` (default: `4`): параллельные OCR-воркеры.
+- `OCR_IF_EMBEDDED_CHARS` (default: `120`): порог, ниже которого OCR выполняется даже при embedded text.
+- `PDF_RENDER_SCALE` (default: `2.0`): масштаб рендера PDF для extraction.
+- `PREVIEW_RENDER_SCALE` (default: `2.2`): масштаб рендера PDF для preview.
+- `OCR_MAX_VARIANTS` (default: `3`): количество вариантов предобработки страницы.
+- `OCR_QUALITY_SHORTCIRCUIT` (default: `320`): порог раннего выхода OCR.
+- `OCR_TESSERACT_TIMEOUT_SEC` (default: `8`): timeout OCR-прохода.
+- `OCR_DATE_TESSERACT_TIMEOUT_SEC` (default: `3`): timeout OCR для дат/печатей.
+- `OCR_RELEASE_SCAN_BUDGET_SEC` (default: `5`): бюджет на доизвлечение даты выпуска по печатям.
+
+### Registry / Evaluation
+
+- `REGISTRY_STATE_FILE` (default: `data/registry_state.json`): файл реестра.
+- `MAX_REGISTRY_RECORDS` (default: `2000`): максимум записей в реестре.
+- `REGISTRY_B64_MAX` (default: `12000000`): лимит base64 payload.
+- `REGISTRY_MAX_IMAGES` (default: `1000`): максимум сохраняемых страниц на запись.
+- `CONTROL_SAMPLES_FILE` (default: `samples/control_samples.json`): путь к контрольным примерам.
+
+### Flask
+
+- `FLASK_HOST` (default: `0.0.0.0`)
+- `FLASK_PORT` (default: `5000`)
+- `FLASK_DEBUG` (default: `0`)
+
+Примечание: `.env.example` содержит рекомендованные значения для текущей демонстрации, они могут отличаться от дефолтов, зашитых в коде.
+
+## Docker-архитектура
+
+`infra/docker-compose.yml` поднимает:
+
+- `app`:
+  - build из `infra/Dockerfile`;
+  - порт `5000:5000`;
+  - volume `registry_data:/app/data`.
+- `ollama`:
+  - image `ollama/ollama:latest`;
+  - порт `11434:11434`;
+  - volume `ollama_data:/root/.ollama`.
+
+Это обеспечивает:
+- сохранение реестра между рестартами контейнеров;
+- сохранение скачанных LLM-моделей.
+
+## Перенос на другой компьютер
+
+### Вариант A (предпочтительный)
+
+1. Клонировать/скопировать проект.
+2. Создать `.env` из `.env.example`.
+3. Запустить `scripts/start.bat` (Windows) или `./scripts/start.sh` (Linux/macOS).
+
+### Важный момент про данные
+
+- Если переносите только папку проекта, Docker volumes (`registry_data`, `ollama_data`) не перенесутся автоматически.
+- Для полного переноса истории реестра/моделей нужен отдельный экспорт volume или повторная обработка документов на новом ПК.
+
+## Производительность и качество
+
+Практические рекомендации:
+
+- Для CPU-only окружения:
+  - `ENABLE_LLM=0`;
+  - `OCR_WORKERS` в диапазоне 2-6 (зависит от CPU);
+  - `OCR_MAX_VARIANTS=2`.
+- Для GPU/мощных станций с Ollama:
+  - `ENABLE_LLM=1`;
+  - увеличить `MAX_LLM_IMAGES` при сложных многостраничных документах.
+- Если часты таймауты LLM:
+  - уменьшить `MAX_LLM_IMAGES` и `LLM_TEXT_LIMIT`;
+  - проверить модель в Ollama (`ollama list`, `ollama run ...`).
 
 ## Ограничения
 
-- Качество OCR зависит от качества скана.
-- На очень шумных/слабо читаемых печатях часть полей требует ручной проверки.
-- Для первого Docker-запуска нужен интернет.
+- Очень шумные/нечитаемые сканы требуют ручной валидации.
+- Документы нестандартного формата могут попадать в `unknown`.
+- Штрихкод строится из ограниченного набора символов (`A-Z0-9-`) и обрезается до 20 символов при генерации.
+
+## Troubleshooting
+
+### `LLM extraction failed ... Read timed out`
+
+Причина: медленная модель или перегрузка Ollama.
+Что делать:
+- уменьшить `MAX_LLM_IMAGES`;
+- уменьшить `LLM_TEXT_LIMIT`;
+- увеличить `LLM_REQUEST_TIMEOUT`/`LLM_MAX_TOTAL_SEC`;
+- временно отключить LLM (`ENABLE_LLM=0`) и работать OCR-only.
+
+### `401 Unauthorized` к OpenAI
+
+Проект сейчас рассчитан на локальную Ollama. Для автономного режима оставьте `ENABLE_LLM=1` + `OLLAMA_BASE_URL`, без облачных ключей.
+
+### После изменения кода в Docker не видно обновлений
+
+Используйте dev-скрипт (`start-dev`) — там включен hot-reload и bind mount проекта.
+
+### Не работает OCR локально без Docker
+
+Проверьте установку Tesseract и `TESSERACT_PATH` (Windows).
+
+## Структура проекта
+
+- `app/app.py` — backend/API/OCR/LLM/excel/evaluate
+- `app/templates/index.html` — frontend (single-page UI)
+- `infra/Dockerfile` — образ приложения
+- `infra/docker-compose.yml` — prod стек app + ollama
+- `infra/docker-compose.dev.yml` — dev hot-reload override
+- `scripts/` — start/stop скрипты для Windows/Linux
+- `samples/control_samples.json` — эталонный набор для контроля
+- `data/.gitkeep` — директория runtime-данных
+- `приложения/` — локальные примеры документов
+- `.env.example` — шаблон конфигурации
+- `requirements.txt` — Python-зависимости
+
+## Минимальная проверка после изменений
+
+```bash
+python -m py_compile app/app.py
+```
+
+Дополнительно (если запущен сервис):
+
+```bash
+curl http://localhost:5000/api/meta
+```
 
 ## Обратная связь
 
