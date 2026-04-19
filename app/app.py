@@ -1594,7 +1594,7 @@ def parse_cabinet_document(raw_text: str) -> Dict:
     if zav_match:
         result["shkaf_zav_nomer"] = zav_match.group(1).strip()
 
-    doc_code_pattern = re.compile(r"\b[А-ЯA-Z]{2,6}\.\d{3,6}\.\d{2,4}(?:-\d{2,3})?[А-ЯA-Z]{0,3}\b")
+    doc_code_pattern = re.compile(r"\b[А-ЯA-Z]{2,6}\.\d{3,6}\.\d{2,4}(?:-\d{2,3})?(?:\s*[А-ЯA-Z]{1,3})?\b")
     serial_pattern = re.compile(r"\b(?:\d{9,14}|[A-ZА-Я0-9]{5,20}|б/н|Б/Н)\b")
 
     items = []
@@ -1617,9 +1617,16 @@ def parse_cabinet_document(raw_text: str) -> Dict:
                 if len(" ".join(name_parts)) >= 90:
                     break
 
-            nearby = " ".join(lines[i:i + 4])
-            doc_match = doc_code_pattern.search(nearby)
-            doc_code = doc_match.group(0) if doc_match else ""
+            context_lines = lines[max(0, i - 4):min(len(lines), i + 3)]
+            context_text = " ".join(context_lines)
+            doc_match = doc_code_pattern.search(context_text)
+            if not doc_match:
+                passport_line = next(
+                    (ln for ln in reversed(context_lines) if re.search(r"\bпаспорт\b", ln, flags=re.IGNORECASE)),
+                    "",
+                )
+                doc_match = doc_code_pattern.search(passport_line) if passport_line else None
+            doc_code = re.sub(r"\s+", "", doc_match.group(0)).strip() if doc_match else ""
 
             items.append({
                 "naimenovanie": re.sub(r"\s{2,}", " ", " ".join(name_parts)).strip() or f"Позиция {len(items) + 1}",
@@ -1926,6 +1933,14 @@ def final_cleanup(data: Dict, raw_text: str = "", source_name: str = "") -> Dict
     elif doc_type == "cabinet_list":
         for key in ("garantia", "srok_sluzhby", "sertifikat", "data_vypuska", "data_priemki"):
             data[key] = None
+        cabinet = parse_cabinet_document(raw_text or "")
+        serials_from_positions = [
+            str(p.get("zavodskoy_nomer", "")).strip()
+            for p in (cabinet.get("pozicii") or [])
+            if str(p.get("zavodskoy_nomer", "")).strip() and str(p.get("zavodskoy_nomer", "")).strip().lower() != "б/н"
+        ]
+        if serials_from_positions:
+            data["zavodskie_nomera"] = normalize_serials((data.get("zavodskie_nomera") or []) + serials_from_positions)
 
     if doc_type == "single_passport":
         serials = normalize_serials(data.get("zavodskie_nomera"))
