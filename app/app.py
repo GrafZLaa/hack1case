@@ -76,6 +76,7 @@ CONTROL_SAMPLES_FILE = os.getenv("CONTROL_SAMPLES_FILE", os.path.join("samples",
 MAX_REGISTRY_RECORDS = max(10, int(os.getenv("MAX_REGISTRY_RECORDS", "2000")))
 REGISTRY_B64_MAX = max(12000000, int(os.getenv("REGISTRY_B64_MAX", "12000000")))
 REGISTRY_MAX_IMAGES = max(1000, int(os.getenv("REGISTRY_MAX_IMAGES", "1000")))
+FEEDBACK_FILE = os.getenv("FEEDBACK_FILE", os.path.join("data", "feedback_log.jsonl"))
 OCR_KEYWORDS = [
     "паспорт",
     "руководство",
@@ -2077,6 +2078,56 @@ def _build_field_evidence(data: Dict, per_page_texts: List[str]) -> Dict[str, An
     return evidence
 
 
+def _build_field_risks(data: Dict, evidence: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, str]]:
+    doc_type = str(data.get("document_type") or "unknown").strip().lower()
+    serials = normalize_serials(data.get("zavodskie_nomera"))
+    evidence = evidence if isinstance(evidence, dict) else {}
+    risks: Dict[str, Dict[str, str]] = {}
+    rank = {"low": 1, "medium": 2, "high": 3}
+
+    def add(field: str, level: str, reason: str):
+        level = (level or "low").strip().lower()
+        if level not in rank:
+            level = "low"
+        current = risks.get(field)
+        if current and rank.get(current.get("level", "low"), 1) >= rank[level]:
+            return
+        risks[field] = {"level": level, "reason": reason[:220]}
+
+    critical = ["naimenovanie", "kod_dokumenta"]
+    if doc_type in {"single_passport", "group_passport"}:
+        critical.append("proizvoditel")
+    for field in critical:
+        if not str(data.get(field) or "").strip():
+            add(field, "high", "Ключевое поле не извлечено")
+
+    if doc_type == "single_passport" and not serials:
+        add("zavodskie_nomera", "high", "Для индивидуального паспорта отсутствует серийный номер")
+    elif doc_type == "group_passport" and len(serials) < 2:
+        add("zavodskie_nomera", "medium", "Для группового паспорта найдено мало серийных номеров")
+    elif doc_type in {"single_passport", "group_passport"} and not data.get("data_vypuska"):
+        add("data_vypuska", "low", "Дата выпуска не найдена")
+
+    for date_field in ("data_vypuska", "data_priemki"):
+        val = str(data.get(date_field) or "").strip()
+        if val and not _is_date_like(val):
+            add(date_field, "medium", "Нетипичный формат даты")
+
+    if str(data.get("garantia") or "").strip() and not _is_duration_like(str(data.get("garantia") or "")):
+        add("garantia", "medium", "Гарантия не похожа на срок/период")
+    if str(data.get("srok_sluzhby") or "").strip() and not _is_duration_like(str(data.get("srok_sluzhby") or "")):
+        add("srok_sluzhby", "medium", "Срок службы не похож на срок/период")
+
+    for field in ("naimenovanie", "kod_dokumenta", "kod_zakaza", "data_vypuska", "data_priemki", "proizvoditel", "adres", "kontakty"):
+        if str(data.get(field) or "").strip() and field not in evidence:
+            add(field, "low", "Для значения не найден прямой источник в тексте")
+
+    if serials and "zavodskie_nomera" not in evidence:
+        add("zavodskie_nomera", "low", "Серийные номера извлечены, но источник не зафиксирован")
+
+    return risks
+
+
 def _normalize_eval_scalar(value: Any) -> str:
     if value is None:
         return ""
@@ -2150,7 +2201,9 @@ def _extract_document_payload(fbytes: bytes, filename: str) -> Dict[str, Any]:
         if release_date:
             final_result["data_vypuska"] = release_date
 
-    final_result["_evidence"] = _build_field_evidence(final_result, per_page_texts)
+    evidence_map = _build_field_evidence(final_result, per_page_texts)
+    final_result["_evidence"] = evidence_map
+    final_result["_field_risks"] = _build_field_risks(final_result, evidence=evidence_map)
     final_result["_checklist"] = _build_record_checklist(final_result)
     final_result["_meta"] = {
         "provider": provider,
@@ -2262,6 +2315,7 @@ def meta():
         "ocr_release_scan_budget_sec": OCR_RELEASE_SCAN_BUDGET_SEC,
         "registry_b64_max": REGISTRY_B64_MAX,
         "registry_max_images": REGISTRY_MAX_IMAGES,
+        "feedback_file": str(_feedback_path()),
     })
 
 
@@ -2271,6 +2325,11 @@ def _project_root() -> Path:
 
 def _registry_path() -> Path:
     configured = Path(REGISTRY_STATE_FILE)
+    return configured if configured.is_absolute() else (_project_root() / configured)
+
+
+def _feedback_path() -> Path:
+    configured = Path(FEEDBACK_FILE)
     return configured if configured.is_absolute() else (_project_root() / configured)
 
 
@@ -2305,6 +2364,64 @@ def _normalize_registry_cabinet(payload: Any) -> Optional[Dict[str, Any]]:
     if not result["shkaf_naim"] and not result["pozicii"]:
         return None
     return result
+
+
+def _normalize_registry_evidence(payload: Any) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for field, val in payload.items():
+        key = _clean_registry_scalar(field, max_len=80)
+        if not key:
+            continue
+        if key == "zavodskie_nomera" and isinstance(val, list):
+            serial_rows = []
+            for item in val[:200]:
+                if not isinstance(item, dict):
+                    continue
+                row = {
+                    "value": _clean_registry_scalar(item.get("value"), max_len=120),
+                }
+                page_raw = item.get("page")
+                if isinstance(page_raw, int) and page_raw > 0:
+                    row["page"] = page_raw
+                snippet = _clean_registry_scalar(item.get("snippet"), max_len=240)
+                if snippet:
+                    row["snippet"] = snippet
+                if row["value"]:
+                    serial_rows.append(row)
+            if serial_rows:
+                out[key] = serial_rows
+            continue
+        if isinstance(val, dict):
+            row = {"value": _clean_registry_scalar(val.get("value"), max_len=220)}
+            page_raw = val.get("page")
+            if isinstance(page_raw, int) and page_raw > 0:
+                row["page"] = page_raw
+            snippet = _clean_registry_scalar(val.get("snippet"), max_len=320)
+            if snippet:
+                row["snippet"] = snippet
+            if row["value"]:
+                out[key] = row
+    return out
+
+
+def _normalize_registry_field_risks(payload: Any) -> Dict[str, Dict[str, str]]:
+    if not isinstance(payload, dict):
+        return {}
+    out: Dict[str, Dict[str, str]] = {}
+    for field, val in payload.items():
+        if not isinstance(val, dict):
+            continue
+        key = _clean_registry_scalar(field, max_len=80)
+        if not key:
+            continue
+        level = str(val.get("level") or "").strip().lower()
+        if level not in {"low", "medium", "high"}:
+            continue
+        reason = _clean_registry_scalar(val.get("reason"), max_len=220)
+        out[key] = {"level": level, "reason": reason}
+    return out
 
 
 def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
@@ -2381,10 +2498,22 @@ def _normalize_registry_record(raw: Any, idx: int) -> Optional[Dict[str, Any]]:
             if isinstance(v, (int, float))
         ]
 
+    evidence_map = _normalize_registry_evidence(raw.get("_evidence"))
+    if evidence_map:
+        rec["_evidence"] = evidence_map
+
     quality_score, missing_fields, needs_review = _quality_assessment(rec)
     rec["quality_score"] = quality_score
     rec["missing_fields"] = missing_fields
     rec["needs_review"] = needs_review
+    rec["_field_risks"] = _build_field_risks(rec, evidence=rec.get("_evidence"))
+    raw_field_risks = _normalize_registry_field_risks(raw.get("_field_risks"))
+    if raw_field_risks:
+        for field, item in raw_field_risks.items():
+            current = rec["_field_risks"].get(field)
+            rank = {"low": 1, "medium": 2, "high": 3}
+            if not current or rank[item["level"]] > rank.get(current.get("level", "low"), 1):
+                rec["_field_risks"][field] = item
     rec["_checklist"] = _build_record_checklist(rec)
     return rec
 
@@ -2501,6 +2630,14 @@ def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[
         ]
         source_path = next((p for p in candidate_paths if p.exists()), None)
         if not source_path:
+            # Fallback for mixed filesystem/localization setups: find by basename in project tree.
+            for p in root.rglob(safe_name):
+                parts_lower = {part.lower() for part in p.parts}
+                if ".venv" in parts_lower or ".git" in parts_lower:
+                    continue
+                source_path = p
+                break
+        if not source_path:
             sample_reports.append({"index": idx, "filename": filename, "error": "file not found"})
             continue
 
@@ -2606,6 +2743,39 @@ def registry_clear():
     })
 
 
+@app.route("/api/feedback", methods=["POST"])
+def submit_feedback():
+    payload = request.json or {}
+    message = _clean_registry_scalar(payload.get("message"), max_len=3000)
+    topic = _clean_registry_scalar(payload.get("topic"), max_len=120)
+    contact = _clean_registry_scalar(payload.get("contact"), max_len=220)
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    context = payload.get("context")
+    if isinstance(context, dict):
+        safe_context = {str(k)[:60]: _clean_registry_scalar(v, max_len=220) for k, v in context.items()}
+    else:
+        safe_context = {}
+
+    row = {
+        "created_at": _utc_now_iso(),
+        "topic": topic,
+        "contact": contact,
+        "message": message,
+        "context": safe_context,
+    }
+    try:
+        path = _feedback_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to save feedback: {e}"}), 500
+    return jsonify({"ok": True, "created_at": row["created_at"]})
+
+
 @app.route("/api/evaluate/control", methods=["POST"])
 def evaluate_control():
     payload = request.json or {}
@@ -2648,6 +2818,78 @@ def evaluate_default():
     report = _evaluate_samples(samples, fields)
     report["source_file"] = str(source)
     return jsonify(report)
+
+
+def _prepare_1c_rows(records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    rows: List[Dict[str, Any]] = []
+    errors: List[Dict[str, Any]] = []
+
+    for row_idx, record in enumerate(records, start=1):
+        r = record if isinstance(record, dict) else {}
+        serials = normalize_serials(r.get("zavodskie_nomera")) or [""]
+        base_key = str(r.get("kod_dokumenta") or r.get("_fileName") or f"record_{row_idx}")
+        document_type = str(r.get("document_type") or "").strip().lower()
+        quality_raw = r.get("quality_score")
+        quality = int(quality_raw) if isinstance(quality_raw, (int, float)) else None
+
+        for sn_idx, serial in enumerate(serials, start=1):
+            row = {
+                "external_key": f"{base_key}#{sn_idx}",
+                "file_name": str(r.get("_fileName") or ""),
+                "doc_code": str(r.get("kod_dokumenta") or ""),
+                "name": str(r.get("naimenovanie") or ""),
+                "order_code": str(r.get("kod_zakaza") or ""),
+                "serial_number": str(serial or ""),
+                "release_date": str(r.get("data_vypuska") or ""),
+                "accept_date": str(r.get("data_priemki") or ""),
+                "manufacturer": str(r.get("proizvoditel") or ""),
+                "address": str(r.get("adres") or ""),
+                "contacts": str(r.get("kontakty") or ""),
+                "warranty": str(r.get("garantia") or ""),
+                "service_life": str(r.get("srok_sluzhby") or ""),
+                "certificate": str(r.get("sertifikat") or ""),
+                "document_type": document_type,
+                "passport_type": str(r.get("tip_pasporta") or ""),
+                "needs_review": bool(r.get("needs_review")),
+                "quality_score": quality,
+            }
+            rows.append(row)
+
+            row_errors: List[str] = []
+            if not row["doc_code"]:
+                row_errors.append("Не указан код документа")
+            if not row["name"]:
+                row_errors.append("Не указано наименование")
+            if document_type in {"single_passport", "group_passport"} and not row["manufacturer"]:
+                row_errors.append("Не указан производитель")
+            if document_type == "single_passport" and not row["serial_number"]:
+                row_errors.append("Для single_passport отсутствует серийный номер")
+            if quality is not None and quality < 60:
+                row_errors.append("Низкое качество извлечения (<60)")
+
+            if row_errors:
+                errors.append({
+                    "row": len(rows),
+                    "external_key": row["external_key"],
+                    "file_name": row["file_name"],
+                    "errors": row_errors,
+                })
+
+    return rows, errors
+
+
+@app.route("/api/export/1c_json", methods=["POST"])
+def export_1c_json():
+    payload = request.json or {}
+    records = payload.get("records", [])
+    rows, validation_errors = _prepare_1c_rows(records)
+    return jsonify({
+        "generated_at": _utc_now_iso(),
+        "rows_count": len(rows),
+        "errors_count": len(validation_errors),
+        "rows": rows,
+        "validation_errors": validation_errors,
+    })
 
 
 @app.route("/api/export/excel", methods=["POST"])
@@ -2766,32 +3008,43 @@ def export_excel():
         "НужнаПроверка",
         "Качество",
     ])
-    for row_idx, r in enumerate(records, start=1):
-        serials = normalize_serials(r.get("zavodskie_nomera")) or [""]
-        base_key = str(r.get("kod_dokumenta") or r.get("_fileName") or f"record_{row_idx}")
-        for sn_idx, sn in enumerate(serials, start=1):
-            ws_1c.append([
-                f"{base_key}#{sn_idx}",
-                r.get("_fileName"),
-                r.get("kod_dokumenta"),
-                r.get("naimenovanie"),
-                r.get("kod_zakaza"),
-                sn,
-                r.get("data_vypuska"),
-                r.get("data_priemki"),
-                r.get("proizvoditel"),
-                r.get("adres"),
-                r.get("kontakty"),
-                r.get("garantia"),
-                r.get("srok_sluzhby"),
-                r.get("sertifikat"),
-                r.get("document_type"),
-                r.get("tip_pasporta"),
-                "Да" if r.get("needs_review") else "Нет",
-                r.get("quality_score"),
-            ])
+    one_c_rows, one_c_errors = _prepare_1c_rows(records)
+    for row in one_c_rows:
+        ws_1c.append([
+            row["external_key"],
+            row["file_name"],
+            row["doc_code"],
+            row["name"],
+            row["order_code"],
+            row["serial_number"],
+            row["release_date"],
+            row["accept_date"],
+            row["manufacturer"],
+            row["address"],
+            row["contacts"],
+            row["warranty"],
+            row["service_life"],
+            row["certificate"],
+            row["document_type"],
+            row["passport_type"],
+            "Да" if row["needs_review"] else "Нет",
+            row["quality_score"],
+        ])
     ws_1c.freeze_panes = "A2"
     _autosize(ws_1c)
+
+    if one_c_errors:
+        ws_1c_err = wb.create_sheet("1C_Ошибки")
+        ws_1c_err.append(["Строка", "ВнешнийКлюч", "Файл", "Ошибки"])
+        for item in one_c_errors:
+            ws_1c_err.append([
+                item.get("row"),
+                item.get("external_key"),
+                item.get("file_name"),
+                "; ".join(item.get("errors") or []),
+            ])
+        ws_1c_err.freeze_panes = "A2"
+        _autosize(ws_1c_err)
 
     ws_check = wb.create_sheet("Чек-лист")
     ws_check.append(["Файл", "Критерий", "Статус", "Детали"])
