@@ -3,12 +3,14 @@ import json
 import base64
 import io
 import re
+import copy
 import traceback
 import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -73,6 +75,9 @@ OLLAMA_MODEL_CACHE_TTL_SEC = max(5, int(os.getenv("OLLAMA_MODEL_CACHE_TTL_SEC", 
 OLLAMA_HEALTH_FAIL_TTL_SEC = max(5, int(os.getenv("OLLAMA_HEALTH_FAIL_TTL_SEC", "25")))
 REGISTRY_STATE_FILE = os.getenv("REGISTRY_STATE_FILE", os.path.join("data", "registry_state.json"))
 CONTROL_SAMPLES_FILE = os.getenv("CONTROL_SAMPLES_FILE", os.path.join("samples", "control_samples.json"))
+EVAL_MAX_WORKERS = max(1, int(os.getenv("EVAL_MAX_WORKERS", "2")))
+EVAL_FAST_DEFAULT = os.getenv("EVAL_FAST_DEFAULT", "1").strip().lower() in {"1", "true", "yes", "on"}
+EVAL_USE_CACHE_DEFAULT = os.getenv("EVAL_USE_CACHE_DEFAULT", "1").strip().lower() in {"1", "true", "yes", "on"}
 MAX_REGISTRY_RECORDS = max(10, int(os.getenv("MAX_REGISTRY_RECORDS", "2000")))
 REGISTRY_B64_MAX = max(12000000, int(os.getenv("REGISTRY_B64_MAX", "12000000")))
 REGISTRY_MAX_IMAGES = max(1000, int(os.getenv("REGISTRY_MAX_IMAGES", "1000")))
@@ -196,6 +201,8 @@ _ollama_health_cache = {
     "until": 0.0,
     "last_error": "",
 }
+_eval_extract_cache: Dict[str, Dict[str, Any]] = {}
+_eval_extract_cache_lock = Lock()
 
 
 def improve_image_variants(img_bytes: bytes) -> List[Image.Image]:
@@ -2128,6 +2135,19 @@ def _build_field_risks(data: Dict, evidence: Optional[Dict[str, Any]] = None) ->
     return risks
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    s = str(value).strip().lower()
+    if s in {"1", "true", "yes", "y", "on"}:
+        return True
+    if s in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def _normalize_eval_scalar(value: Any) -> str:
     if value is None:
         return ""
@@ -2142,7 +2162,12 @@ def _compare_eval_value(expected: Any, predicted: Any) -> bool:
     return _normalize_eval_scalar(expected) == _normalize_eval_scalar(predicted)
 
 
-def _extract_document_payload(fbytes: bytes, filename: str) -> Dict[str, Any]:
+def _extract_document_payload(
+    fbytes: bytes,
+    filename: str,
+    allow_llm: Optional[bool] = None,
+    scan_release_date: bool = True,
+) -> Dict[str, Any]:
     if filename.lower().endswith(".pdf"):
         pages, embedded_text_blocks = pdf_to_images_and_text(fbytes)
     else:
@@ -2165,7 +2190,8 @@ def _extract_document_payload(fbytes: bytes, filename: str) -> Dict[str, Any]:
     llm_error = ""
     skip_by_content = _should_skip_llm_for_file(filename, full_text)
     skip_by_quality = _has_strong_heuristic_result(heur_preview)
-    llm_available = ENABLE_LLM and provider != "disabled"
+    llm_enabled = ENABLE_LLM if allow_llm is None else bool(allow_llm)
+    llm_available = llm_enabled and provider != "disabled"
 
     if llm_available and not skip_by_content and not skip_by_quality:
         llm_images = prepare_llm_images_b64(pages)
@@ -2185,13 +2211,15 @@ def _extract_document_payload(fbytes: bytes, filename: str) -> Dict[str, Any]:
         else:
             llm_error = "LLM skipped"
     else:
-        if ENABLE_LLM:
+        if llm_enabled:
             llm_error = "LLM unavailable: Ollama is not reachable"
         else:
             llm_error = "LLM disabled (ENABLE_LLM=0)"
 
     final_result = heur_preview if not llm_data else final_cleanup(llm_data, raw_text=full_text, source_name=filename)
     if (
+        scan_release_date
+        and
         final_result.get("document_type") != "unknown"
         and not final_result.get("data_vypuska")
         and _should_try_release_date_scan(full_text)
@@ -2212,6 +2240,8 @@ def _extract_document_payload(fbytes: bytes, filename: str) -> Dict[str, Any]:
         "images_sent_to_llm": len(llm_images),
         "ocr_enabled": run_ocr,
         "llm_error": llm_error,
+        "llm_used": bool(llm_data),
+        "scan_release_date": bool(scan_release_date),
     }
     return final_result
 
@@ -2598,11 +2628,95 @@ EVAL_DEFAULT_FIELDS = [
 ]
 
 
-def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[str, Any]:
+def _resolve_control_sample_path(root: Path, safe_name: str) -> Optional[Path]:
+    candidate_paths = [
+        root / safe_name,
+        root / "приложения" / safe_name,
+    ]
+    source_path = next((p for p in candidate_paths if p.exists()), None)
+    if source_path:
+        return source_path
+    for p in root.rglob(safe_name):
+        parts_lower = {part.lower() for part in p.parts}
+        if ".venv" in parts_lower or ".git" in parts_lower:
+            continue
+        return p
+    return None
+
+
+def _make_eval_cache_key(source_path: Path, safe_name: str, allow_llm: Optional[bool], scan_release_date: bool) -> str:
+    try:
+        st = source_path.stat()
+        mt = int(st.st_mtime_ns)
+        size = int(st.st_size)
+    except Exception:
+        mt = 0
+        size = 0
+    llm_tag = "default" if allow_llm is None else ("on" if allow_llm else "off")
+    return (
+        f"{source_path.resolve()}::{safe_name}::{mt}::{size}"
+        f"::llm={llm_tag}::release={int(scan_release_date)}"
+        f"::ocr={OCR_LANG}::psm={','.join(OCR_PSMS)}"
+    )
+
+
+def _eval_cache_get(cache_key: str) -> Optional[Dict[str, Any]]:
+    with _eval_extract_cache_lock:
+        row = _eval_extract_cache.get(cache_key)
+        if not row:
+            return None
+        payload = row.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        return copy.deepcopy(payload)
+
+
+def _eval_cache_set(cache_key: str, payload: Dict[str, Any]) -> None:
+    with _eval_extract_cache_lock:
+        _eval_extract_cache[cache_key] = {
+            "stored_at": time.time(),
+            "payload": copy.deepcopy(payload),
+        }
+
+
+def _predict_for_control_sample(
+    source_path: Path,
+    safe_name: str,
+    allow_llm: Optional[bool],
+    scan_release_date: bool,
+    use_cache: bool,
+) -> Tuple[Dict[str, Any], bool]:
+    cache_key = _make_eval_cache_key(source_path, safe_name, allow_llm=allow_llm, scan_release_date=scan_release_date)
+    if use_cache:
+        cached = _eval_cache_get(cache_key)
+        if cached is not None:
+            return cached, True
+
+    with source_path.open("rb") as fh:
+        predicted = _extract_document_payload(
+            fh.read(),
+            safe_name,
+            allow_llm=allow_llm,
+            scan_release_date=scan_release_date,
+        )
+    if use_cache:
+        _eval_cache_set(cache_key, predicted)
+    return predicted, False
+
+
+def _evaluate_samples(
+    samples: List[Dict[str, Any]],
+    fields: List[str],
+    allow_llm: Optional[bool] = None,
+    scan_release_date: bool = True,
+    use_cache: bool = False,
+) -> Dict[str, Any]:
     total_checks = 0
     matched_checks = 0
     per_field = {f: {"total": 0, "matched": 0} for f in fields}
     sample_reports = []
+    cache_hits = 0
+    cache_misses = 0
 
     root = _project_root()
     for idx, sample in enumerate(samples, start=1):
@@ -2624,26 +2738,23 @@ def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[
             sample_reports.append({"index": idx, "filename": filename, "error": "unsafe filename"})
             continue
 
-        candidate_paths = [
-            root / safe_name,
-            root / "приложения" / safe_name,
-        ]
-        source_path = next((p for p in candidate_paths if p.exists()), None)
-        if not source_path:
-            # Fallback for mixed filesystem/localization setups: find by basename in project tree.
-            for p in root.rglob(safe_name):
-                parts_lower = {part.lower() for part in p.parts}
-                if ".venv" in parts_lower or ".git" in parts_lower:
-                    continue
-                source_path = p
-                break
+        source_path = _resolve_control_sample_path(root, safe_name)
         if not source_path:
             sample_reports.append({"index": idx, "filename": filename, "error": "file not found"})
             continue
 
         try:
-            with source_path.open("rb") as fh:
-                predicted = _extract_document_payload(fh.read(), safe_name)
+            predicted, from_cache = _predict_for_control_sample(
+                source_path,
+                safe_name,
+                allow_llm=allow_llm,
+                scan_release_date=scan_release_date,
+                use_cache=use_cache,
+            )
+            if from_cache:
+                cache_hits += 1
+            else:
+                cache_misses += 1
         except Exception as e:
             sample_reports.append({"index": idx, "filename": filename, "error": f"extract failed: {e}"})
             continue
@@ -2682,6 +2793,7 @@ def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[
             "accuracy_pct": round((matched_for_sample / checks_for_sample * 100.0), 2) if checks_for_sample else None,
             "mismatches": mismatches,
             "meta": predicted.get("_meta", {}),
+            "cached": bool(from_cache),
         })
 
     per_field_result = {}
@@ -2704,6 +2816,15 @@ def _evaluate_samples(samples: List[Dict[str, Any]], fields: List[str]) -> Dict[
         "error_rate_pct": error_rate_pct,
         "per_field": per_field_result,
         "samples": sample_reports,
+        "cache": {
+            "enabled": bool(use_cache),
+            "hits": cache_hits,
+            "misses": cache_misses,
+        },
+        "mode": {
+            "allow_llm": ENABLE_LLM if allow_llm is None else bool(allow_llm),
+            "scan_release_date": bool(scan_release_date),
+        },
     }
 
 
@@ -2786,7 +2907,19 @@ def evaluate_control():
     fields = payload.get("fields") or EVAL_DEFAULT_FIELDS
     if not isinstance(fields, list) or not all(isinstance(x, str) for x in fields):
         return jsonify({"error": "'fields' must be a list of strings"}), 400
-    return jsonify(_evaluate_samples(samples, fields))
+    fast = _as_bool(payload.get("fast"), default=EVAL_FAST_DEFAULT)
+    use_cache = _as_bool(payload.get("cache"), default=EVAL_USE_CACHE_DEFAULT)
+    started = time.perf_counter()
+    report = _evaluate_samples(
+        samples,
+        fields,
+        allow_llm=(False if fast else None),
+        scan_release_date=not fast,
+        use_cache=use_cache,
+    )
+    report["elapsed_sec"] = round(time.perf_counter() - started, 2)
+    report["run_mode"] = "fast" if fast else "full"
+    return jsonify(report)
 
 
 @app.route("/api/evaluate/default", methods=["GET"])
@@ -2815,7 +2948,18 @@ def evaluate_default():
     if not isinstance(fields, list) or not all(isinstance(x, str) for x in fields):
         fields = EVAL_DEFAULT_FIELDS
 
-    report = _evaluate_samples(samples, fields)
+    fast = _as_bool(request.args.get("fast"), default=EVAL_FAST_DEFAULT)
+    use_cache = _as_bool(request.args.get("cache"), default=EVAL_USE_CACHE_DEFAULT)
+    started = time.perf_counter()
+    report = _evaluate_samples(
+        samples,
+        fields,
+        allow_llm=(False if fast else None),
+        scan_release_date=not fast,
+        use_cache=use_cache,
+    )
+    report["elapsed_sec"] = round(time.perf_counter() - started, 2)
+    report["run_mode"] = "fast" if fast else "full"
     report["source_file"] = str(source)
     return jsonify(report)
 

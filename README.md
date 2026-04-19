@@ -250,8 +250,24 @@ UI приложения.
 }
 ```
 
+Опциональные флаги запроса:
+
+- `fast` (`true|false`): быстрый режим (`true`), отключает LLM и тяжелый доскан даты по печати.
+- `cache` (`true|false`): использовать in-memory кэш результатов extraction для повторных прогонов.
+
 ### `GET /api/evaluate/default`
 Контрольный прогон по файлу по умолчанию.
+
+Query-параметры:
+
+- `fast` (`1|0`, default из `EVAL_FAST_DEFAULT`) — быстрый/полный режим.
+- `cache` (`1|0`, default из `EVAL_USE_CACHE_DEFAULT`) — использовать кэш extraction.
+
+В ответе дополнительно возвращаются:
+
+- `elapsed_sec` — длительность прогона;
+- `run_mode` — `fast` или `full`;
+- `cache` — статистика `{ enabled, hits, misses }`.
 
 Поиск файла идет в порядке:
 1. `CONTROL_SAMPLES_FILE`
@@ -453,6 +469,9 @@ python app/app.py
 - `REGISTRY_B64_MAX` (default: `12000000`): лимит base64 payload.
 - `REGISTRY_MAX_IMAGES` (default: `1000`): максимум сохраняемых страниц на запись.
 - `CONTROL_SAMPLES_FILE` (default: `samples/control_samples.json`): путь к контрольным примерам.
+- `EVAL_FAST_DEFAULT` (default: `1`): быстрый режим для `/api/evaluate/default` по умолчанию.
+- `EVAL_USE_CACHE_DEFAULT` (default: `1`): кэш extraction для `/api/evaluate/default` по умолчанию.
+- `EVAL_MAX_WORKERS` (default: `2`): reserved под дальнейшую распараллелку оценки.
 - `FEEDBACK_FILE` (default: `data/feedback_log.jsonl`): файл журналирования обратной связи.
 
 ### Flask
